@@ -58,6 +58,22 @@ class StelarDataFile:
         parameter[par] = val
         self.adddata(ie,parameter,data)
 
+    def scan_parameters(self,quantiles=20):
+        par_df=pd.DataFrame()
+        for ppiepigpii in range(1):
+            par=[]
+            for ie in range(self.get_number_of_experiments()):
+                par.append(self.getparameter(ie+1))
+            par_df=pd.DataFrame(par)
+
+        # categorize the data
+        columns=sorted(par_df.columns)
+        discrete = [x for x in columns if (par_df[x].dtype == object or par_df[x].dtype == str)]
+        continuous = [x for x in columns if x not in discrete]
+        time = [x for x in continuous if x=='TIME']
+        quantileable = [x for x in continuous if len(par_df[x].unique()) > quantiles]
+        return par_df, columns, discrete, continuous, time, quantileable
+
     def sdfimport(self):
         ie=1
         olddir=os.getcwd()

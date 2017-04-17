@@ -13,7 +13,7 @@ from bokeh.io import output_file, show
 from bokeh.plotting import figure
 from bokeh.palettes import Spectral5, viridis
 from bokeh.layouts import widgetbox
-from bokeh.models.widgets import Dropdown, Select
+from bokeh.models.widgets import Dropdown, Select, Button
 from bokeh.models.callbacks import CustomJS
 from tornado.ioloop import IOLoop
 from bokeh.application.handlers import FunctionHandler
@@ -32,20 +32,7 @@ polymer.sdfimport()
 nr_experiments = polymer.get_number_of_experiments()
 
 # parameters to dataframe
-par_df=pd.DataFrame()
-for ppiepigpii in range(1):
-    par=[]
-    for ie in range(nr_experiments):
-        par.append(polymer.getparameter(ie+1))
-    par_df=pd.DataFrame(par)
-
-# categorize the data
-columns=sorted(par_df.columns)
-discrete = [x for x in columns if (par_df[x].dtype == object or par_df[x].dtype == str)]
-continuous = [x for x in columns if x not in discrete]
-time = [x for x in continuous if x=='TIME']
-quantileable = [x for x in continuous if len(par_df[x].unique()) > 20]
-
+par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
 
 io_loop = IOLoop.current()
 #initially set experiment number ie=1
@@ -54,7 +41,7 @@ ie = 1
 #TODO: work with more than one tab in the browser: file input, multiple data analysis and manipulation tabs, file output and recent results tab
 #TODO: clean modify_doc, it is awfully crowded here...
 def modify_doc(doc):
-    fid=polymer.getfid(ie) #dataframe
+    fid=polymer.getfid(ie) #fid is a dataframe containing fids of experiment ie
 
     # TODO: more testing on get_x_axis
     tau = get_x_axis(polymer.getparameter(ie))
@@ -147,7 +134,8 @@ def modify_doc(doc):
         return p4
 
     def update(attr, old, new):
-        layout_p4.children[1] = plot_par()
+        tabs.tabs[1].child.children[1] = plot_par()
+        #layout_p4.children[1] = plot_par()
 
     def cb(attr, old, new):
         ## load experiment ie in plot p1 and p2
@@ -161,8 +149,8 @@ def modify_doc(doc):
             tau = get_x_axis(polymer.getparameter(ie))
             #print(tau)
             try:
-                startpoint=polymer.getparvalue(ie,'fid_amp_start')
-                endpoint=polymer.getparvalue(ie,'fid_amp_stop')
+                startpoint=polymer.getparvalue(ie,'fid_range')[0]
+                endpoint=polymer.getparvalue(ie,'fid_range')[1]
             except:
                 startpoint=int(0.05*polymer.getparvalue(ie,'BS'))
                 endpoint = int(0.1*polymer.getparvalue(ie,'BS'))
@@ -181,9 +169,9 @@ def modify_doc(doc):
             print(popt)
 
             #print(df)
-            print(polymer.getparvalue(ie,'df_magnetization'))
+            #print(polymer.getparvalue(ie,'df_magnetization'))
             fid_slider = RangeSlider(start=1,end=polymer.getparvalue(ie,'BS'),range=(startpoint,endpoint),step=1,callback_policy='mouseup')
-            layout_p1.children[2]=fid_slider
+            tabs.tabs[0].child.children[2]=fid_slider            
 
         except KeyError:
             print('no relaxation experiment found')
@@ -232,8 +220,18 @@ def modify_doc(doc):
     fid_slider.callback=CustomJS(args=dict(source=source2),code="""
         source.data = { range: cb_obj.range }
     """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
+
     
+    def update_parameters():
+        par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters()
+        x.options=columns
+        y.options=columns
+        size.options=['None']+quantileable
+        color.options=['None']+quantileable
     # select boxes for p4
+    button_scan = Button(label='Scan Parameters',type="success")
+    button_scan.on_click(update_parameters)
+    
     x = Select(title='X-Axis', value='ZONE', options=columns)
     x.on_change('value', update)
 
@@ -246,9 +244,13 @@ def modify_doc(doc):
     color = Select(title='Color', value='None', options=['None'] + quantileable)
     color.on_change('value', update)
 
-    controls_p4 = widgetbox([x,y,color,size], width=150)
+
+
+
+    controls_p4 = widgetbox([button_scan, x,y,color,size], width=150)
     layout_p4 = row(controls_p4,plot_par())
 
+    
     #fitting on all experiments
     p3 = figure(plot_width=300, plot_height=300,
             title='normalized phi vs normalized tau', webgl = True,
@@ -265,7 +267,7 @@ def modify_doc(doc):
             fid=polymer.getfid(i)
             tau= get_x_axis(polymer.getparameter(i))
             startpoint=int(0.05*polymer.getparameter(i)['BS'])
-            endpoint=int(0.1*polymer.getparameter(i)['BS']) #TODO: make a range slider to get start- and endpoint interactively
+            endpoint=int(0.1*polymer.getparameter(i)['BS'])
             phi = get_mag_amplitude(fid, startpoint, endpoint,
                                     polymer.getparameter(i)['NBLK'], polymer.getparameter(i)['BS'])
             df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
@@ -282,7 +284,7 @@ def modify_doc(doc):
             phi = popt[0]**-1*(df.phi_normalized - popt[2])
             p3_df=pd.DataFrame(data=np.c_[ tau, phi ], columns=['tau', 'phi'])
             source_p3=ColumnDataSource(data=ColumnDataSource.from_df(p3_df))
-            p3_line_glyph.append(p3.line('tau', 'phi', source=source_p3)) #TODO add nice colors
+            p3_line_glyph.append(p3.line('tau', 'phi', source=source_p3))
             MANY_COLORS+=1
         except KeyError:
             print('no relaxation experiment found')
@@ -291,8 +293,13 @@ def modify_doc(doc):
         p3_line_glyph[ic].glyph.line_color=COLORS[ic]
     par_df['r1']=r1
     layout_p1 = column(slider, p1,fid_slider, p2, p3)
-    doc.add_root(layout_p1)
-    doc.add_root(layout_p4)
+    tab_relaxation = Panel(child = layout_p1, title = 'Relaxation')
+    tab_parameters = Panel(child = layout_p4, title = 'Parameters')
+    tabs = Tabs(tabs = [tab_relaxation, tab_parameters])
+    #print(tabs.tabs[1].child.children[1]) # to access figure in parameters
+    doc.add_root(tabs)
+    #doc.add_root(layout_p1)
+    #doc.add_root(layout_p4)
     doc.add_root(source) # i need to add source to detect changes
     doc.add_root(source2)
 
