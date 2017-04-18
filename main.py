@@ -27,7 +27,7 @@ from scipy.optimize import leastsq
 
 #specify and import data file
 path=os.path.join(os.path.curdir,'data')
-polymer=sdf.StelarDataFile('297K.sdf',path)
+polymer=sdf.StelarDataFile('glyzerin_d3_300K.sdf',path)
 polymer.sdfimport()
 nr_experiments = polymer.get_number_of_experiments()
 
