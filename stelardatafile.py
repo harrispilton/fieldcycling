@@ -10,6 +10,9 @@ class StelarDataFile:
         self.PathName=PathName
         self.options='standard'
         self.datas={}
+
+    def file(self):
+        return os.path.join(self.PathName,self.FileName)
                     
     def options(self, text):
         self.options=text

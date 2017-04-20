@@ -6,20 +6,19 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import re
-import matplotlib as mpl #for the colormaps
 from bokeh.charts import Scatter, output_file, show
 from bokeh.models.widgets import Panel, Tabs
 from bokeh.io import output_file, show
-from bokeh.plotting import figure
+from bokeh.plotting import figure, ColumnDataSource
 from bokeh.palettes import Spectral5, viridis
 from bokeh.layouts import widgetbox
-from bokeh.models.widgets import Dropdown, Select, Button
+from bokeh.models.widgets import Dropdown, Select, Button, DataTable, TableColumn, Slider, RangeSlider, TextInput#, ColumnDataSource
 from bokeh.models.callbacks import CustomJS
 from tornado.ioloop import IOLoop
 from bokeh.application.handlers import FunctionHandler
 from bokeh.application import Application
 from bokeh.layouts import column, row
-from bokeh.models import ColumnDataSource, Slider, RangeSlider
+#from bokeh.models import ColumnDataSource#, Slider, RangeSlider, TextInput
 from bokeh.server.server import Server
 import stelardatafile as sdf
 from utils import get_x_axis, model_exp_dec, fun_exp_dec, get_mag_amplitude, magnetization_fit
@@ -34,7 +33,7 @@ nr_experiments = polymer.get_number_of_experiments()
 # parameters to dataframe
 par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
 
-io_loop = IOLoop.current()
+
 #initially set experiment number ie=1
 ie = 1
 
@@ -73,8 +72,9 @@ def modify_doc(doc):
     source_df = ColumnDataSource(data=ColumnDataSource.from_df(df))
     
     # create and plot figures
-    p1 = figure(plot_width=300, plot_height=300,
-                title='Free Induction Decay', webgl=True)
+    p1 = figure(plot_width=800, plot_height=500,
+                title='Free Induction Decay', webgl=True,
+                lod_factor=1000,lod_interval=150,lod_threshold=1000)
     p1.line('index', 'im', source=source_fid, color='blue')
     p1.line('index', 'real', source=source_fid, color='green')
     p1.line('index', 'magnitude', source=source_fid, color='red')
@@ -132,9 +132,9 @@ def modify_doc(doc):
        
         p4.circle(x=xs, y=ys, color=c, size=sz, line_color="white", alpha=0.6, hover_color='white', hover_alpha=0.5)
         return p4
-
+    
     def update(attr, old, new):
-        tabs.tabs[1].child.children[1] = plot_par()
+        tabs.tabs[1].child.children[1] = plot_par() #update figure 1 in parameters tab
         #layout_p4.children[1] = plot_par()
 
     def cb(attr, old, new):
@@ -170,8 +170,11 @@ def modify_doc(doc):
 
             #print(df)
             #print(polymer.getparvalue(ie,'df_magnetization'))
-            fid_slider = RangeSlider(start=1,end=polymer.getparvalue(ie,'BS'),range=(startpoint,endpoint),step=1,callback_policy='mouseup')
-            tabs.tabs[0].child.children[2]=fid_slider            
+            try:
+                fid_slider.range(startpoint,endpoint)
+            except:
+                fid_slider = RangeSlider(start=1,end=polymer.getparvalue(ie,'BS'),range=(startpoint,endpoint),step=1,callback_policy='mouseup')
+                tabs.tabs[0].child.children[2]=fid_slider            
 
         except KeyError:
             print('no relaxation experiment found')
@@ -213,8 +216,7 @@ def modify_doc(doc):
         source_df.data = ColumnDataSource.from_df(df)
         polymer.addparameter(ie,'df_magnetization',df)
         polymer.addparameter(ie,'popt(mono_exp)',popt)
-        pass
-    
+        
     source2 = ColumnDataSource(data=dict(range=[], ie=[]))
     source2.on_change('data',calculate_mag_dec)
     fid_slider.callback=CustomJS(args=dict(source=source2),code="""
@@ -229,7 +231,7 @@ def modify_doc(doc):
         size.options=['None']+quantileable
         color.options=['None']+quantileable
     # select boxes for p4
-    button_scan = Button(label='Scan Parameters',type="success")
+    button_scan = Button(label='Scan Parameters',button_type="success")
     button_scan.on_click(update_parameters)
     
     x = Select(title='X-Axis', value='ZONE', options=columns)
@@ -266,8 +268,12 @@ def modify_doc(doc):
             par=polymer.getparameter(i)
             fid=polymer.getfid(i)
             tau= get_x_axis(polymer.getparameter(i))
-            startpoint=int(0.05*polymer.getparameter(i)['BS'])
-            endpoint=int(0.1*polymer.getparameter(i)['BS'])
+            try:
+                startpoint=polymer.getparvalue(i,'fid_range')[0]
+                endpoint=polymer.getparvalue(i,'fid_range')[1]
+            except:
+                startpoint=int(0.05*polymer.getparvalue(i,'BS'))
+                endpoint = int(0.1*polymer.getparvalue(i,'BS'))
             phi = get_mag_amplitude(fid, startpoint, endpoint,
                                     polymer.getparameter(i)['NBLK'], polymer.getparameter(i)['BS'])
             df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
@@ -292,20 +298,72 @@ def modify_doc(doc):
     for ic in range(MANY_COLORS):
         p3_line_glyph[ic].glyph.line_color=COLORS[ic]
     par_df['r1']=r1
+
+
+    ####
+    #### TODO: write file input
+    ####
+    
+    table_source=ColumnDataSource(data=dict())
+    sdf_list=[polymer]
+    filenames=[x.file() for x in sdf_list]
+    filenames_df=pd.DataFrame(data=filenames,columns=['file'])
+    table_source.data=ColumnDataSource.from_df(filenames_df)
+##       
+##    sdf_list=[polymer]
+##    filenames=[x.file() for x in sdf_list]
+##    print(filenames)
+##    filedict={'file':filenames}
+##    print(filedict)
+##    table_source.data=ColumnDataSource(filedict)
+
+    t_columns = [
+        TableColumn(field='file', title='Path / Filename'),
+        #TableColumn(field='file', title='Filename'),
+        ]
+    table=DataTable(source=table_source,columns=t_columns)
+    pathbox=TextInput(title="Path",value=os.path.curdir)
+    filebox=TextInput(title="Filename",value="*.sdf")
+
+    layout_input=column(pathbox,filebox,table)  
+    
+    def table_update(attr,old,new):
+        print('Hello table')
+        path=pathbox.value.strip()
+        file=filebox.value.strip()
+        if file=="*.sdf":
+            print('hello IF')
+            allsdf=filter(lambda x: x.endswith('.sdf'),os.listdir(path))
+            for f in allsdf:
+                sdf_list.append(sdf.StelarDataFile(f,path))
+        else:
+            sdf_list.append(sdf.StelarDataFile(file,path))
+        
+        filenames=[x.file() for x in sdf_list]
+        filenames_df=pd.DataFrame(data=filenames,columns=['file'])
+        table_source.data=ColumnDataSource.from_df(filenames_df)
+
+    pathbox.on_change('value',table_update)
+    filebox.on_change('value',table_update)
+
+        
     layout_p1 = column(slider, p1,fid_slider, p2, p3)
     tab_relaxation = Panel(child = layout_p1, title = 'Relaxation')
     tab_parameters = Panel(child = layout_p4, title = 'Parameters')
-    tabs = Tabs(tabs = [tab_relaxation, tab_parameters])
-    #print(tabs.tabs[1].child.children[1]) # to access figure in parameters
+    tab_input = Panel(child = layout_input, title = 'Data In')
+    tabs = Tabs(tabs = [tab_relaxation, tab_parameters, tab_input])
+
+
+    
     doc.add_root(tabs)
-    #doc.add_root(layout_p1)
-    #doc.add_root(layout_p4)
     doc.add_root(source) # i need to add source to detect changes
     doc.add_root(source2)
 
 
+
 bokeh_app = Application(FunctionHandler(modify_doc))
 
+io_loop = IOLoop.current()
 server = Server({'/': bokeh_app}, io_loop=io_loop)
 server.start()
 
