@@ -137,23 +137,26 @@ def modify_doc(doc):
         tabs.tabs[1].child.children[1] = plot_par() #update figure 1 in parameters tab
         #layout_p4.children[1] = plot_par()
 
-    def cb(attr, old, new):
-        ## load experiment ie in plot p1 and p2
-        ie = new['value'][0]
-        fid = polymer.getfid(ie)
-        #print(fid)
-        #source_fid = ColumnDataSource.from_df(data=fid)
-        source_fid.data=ColumnDataSource.from_df(fid)
-        #print(source_fid)
+    def experiment_update(attr, old, new):
+        ie = experiment_slider.value
         try:
-            tau = get_x_axis(polymer.getparameter(ie))
-            #print(tau)
-            try:
-                startpoint=polymer.getparvalue(ie,'fid_range')[0]
-                endpoint=polymer.getparvalue(ie,'fid_range')[1]
-            except:
-                startpoint=int(0.05*polymer.getparvalue(ie,'BS'))
-                endpoint = int(0.1*polymer.getparvalue(ie,'BS'))
+            fid_slider.range=polymer.getparvalue(ie,'fid_range')
+        except:
+            startpoint = int(0.05 * polymer.getparvalue(ie,'BS'))
+            endpoint = int(0.1 * polymer.getparvalue(ie,'BS'))
+            fid_slider.range=(startpoint,endpoint)
+        calculate_mag_dec(attr,old,new)
+
+    def calculate_mag_dec(attr, old, new):
+        ## load selected experiment visualize in plot p1 and p2
+        ie = experiment_slider.value   #get expermient number from the slider
+        fid = polymer.getfid(ie) #read fid for selected experiment
+        source_fid.data=ColumnDataSource.from_df(fid) #convert fid to bokeh format
+        try:
+            tau = get_x_axis(polymer.getparameter(ie)) #calculates tau for se
+            startpoint=fid_slider.range[0]
+            endpoint = fid_slider.range[1]
+            polymer.addparameter(ie,'fid_range',(startpoint,endpoint))
             phi = get_mag_amplitude(fid, startpoint, endpoint,
                                     polymer.getparvalue(ie,'NBLK'),
                                     polymer.getparvalue(ie,'BS'))
@@ -167,14 +170,7 @@ def modify_doc(doc):
             
             polymer.addparameter(ie,'popt(mono_exp)',popt)
             print(popt)
-
-            #print(df)
-            #print(polymer.getparvalue(ie,'df_magnetization'))
-            try:
-                fid_slider.range(startpoint,endpoint)
-            except:
-                fid_slider = RangeSlider(start=1,end=polymer.getparvalue(ie,'BS'),range=(startpoint,endpoint),step=1,callback_policy='mouseup')
-                tabs.tabs[0].child.children[2]=fid_slider            
+        
 
         except KeyError:
             print('no relaxation experiment found')
@@ -188,34 +184,12 @@ def modify_doc(doc):
     
     #this source is only used to communicate to the actual callback (cb)
     source = ColumnDataSource(data=dict(value=[]))
-    source.on_change('data',cb)
+    source.on_change('data',experiment_update)
     
-    slider = Slider(start=1, end=nr_experiments, value=1, step=1,callback_policy='mouseup')
-    slider.callback=CustomJS(args=dict(source=source),code="""
+    experiment_slider = Slider(start=1, end=nr_experiments, value=1, step=1,callback_policy='mouseup')
+    experiment_slider.callback = CustomJS(args=dict(source=source),code="""
         source.data = { value: [cb_obj.value] }
     """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
-
-    def calculate_mag_dec(attr,old,new):
-        ie=slider.value
-        polymer.addparameter(ie,'fid_range',new['range'])
-        print(polymer.getparvalue(ie,'fid_range')) #this works
-        start = new['range'][0]
-        stop = new['range'][1]
-        fid=polymer.getfid(ie)
-        tau = polymer.getparvalue(ie,'df_magnetization').tau
-        phi = get_mag_amplitude(fid, start, stop,
-                                    polymer.getparvalue(ie,'NBLK'),
-                                    polymer.getparvalue(ie,'BS'))
-
-        df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
-        df['phi_normalized'] = (df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] )
-
-        fit_option = 2 #mono exponential, 3 parameter fit
-        p0=polymer.getparvalue(ie,'popt(mono_exp)')
-        df, popt = magnetization_fit(df, p0, fit_option)
-        source_df.data = ColumnDataSource.from_df(df)
-        polymer.addparameter(ie,'df_magnetization',df)
-        polymer.addparameter(ie,'popt(mono_exp)',popt)
         
     source2 = ColumnDataSource(data=dict(range=[], ie=[]))
     source2.on_change('data',calculate_mag_dec)
@@ -302,20 +276,15 @@ def modify_doc(doc):
 
     ####
     #### TODO: write file input
+    #### TODO: select files to import
+    #### TODO: discard imported files
     ####
     
     table_source=ColumnDataSource(data=dict())
     sdf_list=[polymer]
     filenames=[x.file() for x in sdf_list]
-    filenames_df=pd.DataFrame(data=filenames,columns=['file'])
-    table_source.data=ColumnDataSource.from_df(filenames_df)
-##       
-##    sdf_list=[polymer]
-##    filenames=[x.file() for x in sdf_list]
-##    print(filenames)
-##    filedict={'file':filenames}
-##    print(filedict)
-##    table_source.data=ColumnDataSource(filedict)
+    files_df=pd.DataFrame(data=filenames,columns=['file'])
+    table_source.data=ColumnDataSource.from_df(files_df)
 
     t_columns = [
         TableColumn(field='file', title='Path / Filename'),
@@ -347,7 +316,7 @@ def modify_doc(doc):
     filebox.on_change('value',table_update)
 
         
-    layout_p1 = column(slider, p1,fid_slider, p2, p3)
+    layout_p1 = column(experiment_slider, p1,fid_slider, p2, p3)
     tab_relaxation = Panel(child = layout_p1, title = 'Relaxation')
     tab_parameters = Panel(child = layout_p4, title = 'Parameters')
     tab_input = Panel(child = layout_input, title = 'Data In')
