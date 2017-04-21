@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.matlib
+import scipy.signal
 from num_string_eval import NumericStringParser
 
 def fit_exp_linear(t, y, C=0):
@@ -81,3 +82,29 @@ def get_x_axis(parameters):
         Tini, Tend = Tini_Tend
         x = np.logspace(np.log10(Tini),np.log10(Tend),nblk) # re-create the time vector
     return x
+
+
+##nextpow2 and freq_shift were copied from the internet. not carefully checked
+def nextpow2(x):
+    """Return the first integer N such that 2**N >= abs(x)"""
+
+    return int(np.ceil(np.log2(np.abs(x))))
+
+
+##the algorithm can produce artifacts!! use with care
+def freq_shift(x, f_shift, dt):
+    """
+    Shift the specified signal by the specified frequency.
+    """
+
+    # Pad the signal with zeros to prevent the FFT invoked by the transform from
+    # slowing down the computation:
+    N_orig = len(x)
+    N_padded = 2**nextpow2(N_orig)
+    t = np.arange(0, N_padded)
+    return (
+        scipy.signal.hilbert(
+            np.hstack(
+                (x, np.zeros(N_padded-N_orig, x.dtype))
+                )
+            )*np.exp(2j*np.pi*f_shift*dt*t))[:N_orig].real

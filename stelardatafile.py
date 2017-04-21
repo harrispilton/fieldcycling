@@ -3,6 +3,7 @@ import sys
 import re
 import numpy as np
 import pandas as pd
+from utils import freq_shift
 
 class StelarDataFile:
     def __init__(self, FileName, PathName):
@@ -52,7 +53,7 @@ class StelarDataFile:
                          columns=['real', 'im'])/ns
         fid['magnitude']=( fid['real']**2 + fid['im']**2 )**0.5
         return fid
-    
+
     def get_number_of_experiments(self):
         return len(self.datas)
 
@@ -60,6 +61,22 @@ class StelarDataFile:
         parameter, data = self.datas[ie]
         parameter[par] = val
         self.adddata(ie,parameter,data)
+
+    def rephase_fids(self):
+        for ie in range(1,self.get_number_of_experiments()):
+            fid=self.getfid(ie)
+            phase=0 #rephase in deg
+            freq=self.getparvalue(ie,'F1')
+            dt=self.getparvalue(ie,'DW')*1e-6
+            
+            fid['real']=np.real(
+                (fid['real'] + fid['im'] * 1.j) * np.exp(1j*phase/360*2*np.pi ) * np.exp(-1j* freq *np.array(fid.index))
+                )
+            fid['im']=np.imag(
+                (fid['real'] + fid['im'] * 1.j) * np.exp(1j*phase/360*2*np.pi ) * np.exp(-1j* freq *np.array(fid.index))
+                )
+            #fid['im']=np.imag((fid['real'] + fid['im'] * 1.j) * np.exp(1j*(phase/360+freq*fid.index)*2*np.pi))
+            self.addparameter(ie,'rephased_fid',fid)
 
     def scan_parameters(self,quantiles=20):
         par_df=pd.DataFrame()

@@ -29,6 +29,7 @@ path=os.path.join(os.path.curdir,'data')
 polymer=sdf.StelarDataFile('glyzerin_d3_300K.sdf',path)
 polymer.sdfimport()
 nr_experiments = polymer.get_number_of_experiments()
+polymer.rephase_fids()
 
 # parameters to dataframe
 par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
@@ -41,6 +42,7 @@ ie = 1
 #TODO: clean modify_doc, it is awfully crowded here...
 def modify_doc(doc):
     fid=polymer.getfid(ie) #fid is a dataframe containing fids of experiment ie
+    rephased_fid=polymer.getparvalue(ie,'rephased_fid')
 
     # TODO: more testing on get_x_axis
     tau = get_x_axis(polymer.getparameter(ie))
@@ -48,6 +50,7 @@ def modify_doc(doc):
     #calculate magnetization:
     startpoint=int(0.05*polymer.getparvalue(ie,'BS'))
     endpoint=int(0.1*polymer.getparvalue(ie,'BS')) #TODO: make a range slider to get start- and endpoint interactively
+    polymer.addparameter(ie,'fid_range',(startpoint,endpoint))
     phi = get_mag_amplitude(fid, startpoint, endpoint,
                             polymer.getparvalue(ie,'NBLK'),
                             polymer.getparvalue(ie,'BS'))
@@ -67,18 +70,19 @@ def modify_doc(doc):
     df['fit_phi'] = model_exp_dec(df.tau, *popt)
     
 
-    # convert data to handle in bokeh
-    source_fid = ColumnDataSource(data=ColumnDataSource.from_df(fid))
     
     # create and plot figures
     p1 = figure(plot_width=800, plot_height=500,
                 title='Free Induction Decay', webgl=True,
                 lod_factor=1000,lod_interval=150,lod_threshold=1000)
+
+
+    # convert data to handle in bokeh
+    source_fid = ColumnDataSource(data=ColumnDataSource.from_df(rephased_fid))
     p1.line('index', 'im', source=source_fid, color='blue')
     p1.line('index', 'real', source=source_fid, color='green')
     p1.line('index', 'magnitude', source=source_fid, color='red')
-
-    fid_slider = RangeSlider(start=1,end=polymer.getparvalue(ie,'BS'),step=1,callback_policy='mouseup')
+    
 
     source_mag_dec = ColumnDataSource(data=ColumnDataSource.from_df(df))
     p2 = figure(plot_width=300, plot_height=300,
@@ -182,21 +186,24 @@ def modify_doc(doc):
             source_mag_dec.data = ColumnDataSource.from_df(df)
 
     
-    #this source is only used to communicate to the actual callback (cb)
+    experiment_slider = Slider(start=1, end=nr_experiments, value=1, step=1,callback_policy='mouseup') #select experiment by value
+    fid_slider = RangeSlider(start=1,end=polymer.getparvalue(ie,'BS'),range=polymer.getparvalue(ie,'fid_range'),step=1,callback_policy='mouseup')#select the intervall from which magneitization is calculated from fid
+
+
     source = ColumnDataSource(data=dict(value=[]))
-    source.on_change('data',experiment_update)
-    
-    experiment_slider = Slider(start=1, end=nr_experiments, value=1, step=1,callback_policy='mouseup')
+    source.on_change('data',experiment_update) #source for experiment_slider
+    source2 = ColumnDataSource(data=dict(range=[], ie=[]))
+    source2.on_change('data',calculate_mag_dec)#source for fid_slider
+
+
     experiment_slider.callback = CustomJS(args=dict(source=source),code="""
         source.data = { value: [cb_obj.value] }
     """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
-        
-    source2 = ColumnDataSource(data=dict(range=[], ie=[]))
-    source2.on_change('data',calculate_mag_dec)
+    
     fid_slider.callback=CustomJS(args=dict(source=source2),code="""
         source.data = { range: cb_obj.range }
     """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
-
+    
     
     def update_parameters():
         par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters()
