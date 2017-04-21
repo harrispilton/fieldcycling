@@ -109,7 +109,7 @@ class StelarDataFile:
                         try:
                             parameters['TIME']=pd.to_datetime(words[1])
                         except:
-                            print('Time cannot be read')
+                            print('TIME is not in datetime Format')
                         
 
                 try:
@@ -130,5 +130,5 @@ class StelarDataFile:
                         parameters=dict()
                 except KeyError:
                     print('fastforward') #no experiment found
-        print(str(ie)+' experiments read')
+        print(str(ie-1)+' experiments read')
         os.chdir(olddir)

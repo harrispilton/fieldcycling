@@ -69,7 +69,6 @@ def modify_doc(doc):
 
     # convert data to handle in bokeh
     source_fid = ColumnDataSource(data=ColumnDataSource.from_df(fid))
-    source_df = ColumnDataSource(data=ColumnDataSource.from_df(df))
     
     # create and plot figures
     p1 = figure(plot_width=800, plot_height=500,
@@ -81,10 +80,11 @@ def modify_doc(doc):
 
     fid_slider = RangeSlider(start=1,end=polymer.getparvalue(ie,'BS'),step=1,callback_policy='mouseup')
 
+    source_mag_dec = ColumnDataSource(data=ColumnDataSource.from_df(df))
     p2 = figure(plot_width=300, plot_height=300,
                 title='Magnetization Decay')
-    p2.circle_cross('tau', 'phi_normalized', source=source_df, color="navy")
-    p2.line('tau', 'fit_phi', source=source_df, color="teal")
+    p2.circle_cross('tau', 'phi_normalized', source=source_mag_dec, color="navy")
+    p2.line('tau', 'fit_phi', source=source_mag_dec, color="teal")
 
     
     # in the plot 4 use followingimpo
@@ -139,6 +139,7 @@ def modify_doc(doc):
 
     def experiment_update(attr, old, new):
         ie = experiment_slider.value
+        fid_slider.end = polymer.getparvalue(ie,'BS')
         try:
             fid_slider.range=polymer.getparvalue(ie,'fid_range')
         except:
@@ -150,28 +151,27 @@ def modify_doc(doc):
     def calculate_mag_dec(attr, old, new):
         ## load selected experiment visualize in plot p1 and p2
         ie = experiment_slider.value   #get expermient number from the slider
-        fid = polymer.getfid(ie) #read fid for selected experiment
+        fid = polymer.getfid(ie) #read FID or series of FIDs for selected experiment
         source_fid.data=ColumnDataSource.from_df(fid) #convert fid to bokeh format
         try:
-            tau = get_x_axis(polymer.getparameter(ie)) #calculates tau for se
-            startpoint=fid_slider.range[0]
-            endpoint = fid_slider.range[1]
-            polymer.addparameter(ie,'fid_range',(startpoint,endpoint))
+            tau = get_x_axis(polymer.getparameter(ie)) #numpy array containing the taus for experiment ie
+            startpoint=fid_slider.range[0] #lower integration bound
+            endpoint = fid_slider.range[1] #upper integration bound
+            polymer.addparameter(ie,'fid_range',(startpoint,endpoint)) #add integration range to parameters to make it accesible
             phi = get_mag_amplitude(fid, startpoint, endpoint,
                                     polymer.getparvalue(ie,'NBLK'),
-                                    polymer.getparvalue(ie,'BS'))
-            df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
-            df['phi_normalized'] = (df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] )
-            polymer.addparameter(ie,'df_magnetization',df)
+                                    polymer.getparvalue(ie,'BS')) # list containing averaged fid amplitudes (which is proportional to a magnetization phi)
+            df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi']) # DataFrames are nice
+            df['phi_normalized'] = (df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] ) #Normalize magnetization,
+            #Note: in the normalized magnetization the magnetization build-up curves and magnetization decay curves look alike
+            #Note: this makes it easier for fitting as everything looks like 1 * exp(-R/time) in first order
+            polymer.addparameter(ie,'df_magnetization',df) # make the magnetization dataframe accesible as parameter
             fit_option = 2 #mono exponential, 3 parameter fit
-            p0=[1.0, polymer.getparvalue(ie,'T1MX')**-1*2, 0]
-            df, popt = magnetization_fit(df, p0, fit_option)
-            source_df.data = ColumnDataSource.from_df(df)
-            
-            polymer.addparameter(ie,'popt(mono_exp)',popt)
-            print(popt)
-        
-
+            p0=[1.0, polymer.getparvalue(ie,'T1MX')**-1*2, 0] #choose startparameters for fitting an exponential decay
+            df, popt = magnetization_fit(df, p0, fit_option) # use leastsq to find optimal parameters
+            source_mag_dec.data = ColumnDataSource.from_df(df) # source_df will push the new data to the figure
+            polymer.addparameter(ie,'popt(mono_exp)',popt) # add fitting parameters for later access
+            print(popt) # print the fitting parameters to console (for convenience)
         except KeyError:
             print('no relaxation experiment found')
             tau=np.zeros(1)
@@ -179,7 +179,7 @@ def modify_doc(doc):
             df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
             df['phi_normalized'] = np.zeros(1)
             df['fit_phi'] = np.zeros(1)
-            source_df.data = ColumnDataSource.from_df(df)
+            source_mag_dec.data = ColumnDataSource.from_df(df)
 
     
     #this source is only used to communicate to the actual callback (cb)
@@ -237,7 +237,7 @@ def modify_doc(doc):
     r1=np.zeros(nr_experiments)
     MANY_COLORS = 0
     p3_line_glyph=[]
-    for i in range(nr_experiments):
+    for i in range(1,nr_experiments):
         try:
             par=polymer.getparameter(i)
             fid=polymer.getfid(i)
@@ -248,6 +248,7 @@ def modify_doc(doc):
             except:
                 startpoint=int(0.05*polymer.getparvalue(i,'BS'))
                 endpoint = int(0.1*polymer.getparvalue(i,'BS'))
+                polymer.addparameter(i,'fid_range',(startpoint,endpoint))
             phi = get_mag_amplitude(fid, startpoint, endpoint,
                                     polymer.getparameter(i)['NBLK'], polymer.getparameter(i)['BS'])
             df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
@@ -268,6 +269,9 @@ def modify_doc(doc):
             MANY_COLORS+=1
         except KeyError:
             print('no relaxation experiment found')
+            polymer.addparameter(i,'amp',float('NaN'))
+            polymer.addparameter(i,'r1',float('NaN'))
+            polymer.addparameter(i,'noise',float('NaN'))
     COLORS=viridis(MANY_COLORS)
     for ic in range(MANY_COLORS):
         p3_line_glyph[ic].glyph.line_color=COLORS[ic]
