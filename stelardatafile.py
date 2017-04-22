@@ -54,7 +54,14 @@ class StelarDataFile:
         #calculate series of fid
         fid=pd.DataFrame(self.getdata(ie),index=np.linspace(dw,dw*bs*nblk,bs*nblk),
                          columns=['real', 'im'])/ns
-        fid['magnitude']=( fid['real']**2 + fid['im']**2 )**0.5
+        fid['magnitude'] = ( fid['real']**2 + fid['im']**2 )**0.5
+##        complex_fid = fid['real']+ 1j * fid['im']
+##        complex_fid_corr=np.mean(complex_fid)
+##        blocks=[]
+##        for g,df in fid.groupby(np.arange(len(fid))//bs):
+##            blocks.append(df)
+##        for block in blocks:
+##            rephase
         return fid
 
     def get_number_of_experiments(self):
