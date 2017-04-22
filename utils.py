@@ -16,11 +16,19 @@ def fun_exp_dec(par,t,y):
     return model_exp_dec(t, A,K,C) - y
 
 def magnetization_fit(df,p0,fit_option):
-    # fit exponential decay. 
-    # Options:
-    #    1) Linearize the system, and fit a line to the log of the data.
-    #        - would be prefered, but needs the y-axes offset.
-    #    2) Use a non-linear solver (e.g. scipy.optimize.curve_fit
+    """ fits exponential decay. 
+
+    :param df: data
+    :type df: pandas dataframe
+    :param p0: initial set of parameters
+    :type p0: list of 3 elements
+    :param fit_option: 1) Linearize the system, and fit a line to the log of the data.
+                            - would be prefered, but needs the y-axes offset.
+                       2) Use a non-linear solver (e.g. scipy.optimize.curve_fit
+    :type fit_option: int, 1 or 2
+    """
+    ''' 
+    '''
     if fit_option ==1:
         C0 = 0 # offset
         popt = fit_exp_linear(df.tau, df.phi_normalized, C0)
