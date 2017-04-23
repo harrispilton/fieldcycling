@@ -53,8 +53,7 @@ def nextpow2(x):
 
     return int(np.ceil(np.log2(np.abs(x))))
 
-
-##the algorithm can produce artifacts!! use with care
+##the sfb algorithm can produce artifacts!! use with care
 def freq_shift(x, f_shift, dt):
     """
     Shift the specified signal by the specified frequency.
@@ -71,3 +70,8 @@ def freq_shift(x, f_shift, dt):
                 (x, np.zeros(N_padded-N_orig, x.dtype))
                 )
             )*np.exp(2j*np.pi*f_shift*dt*t))[:N_orig].real
+
+def fft_fid(fid,nblk,bs):
+    iblk=np.argmax(get_mag_amplitude(fid,1,bs,nblk,bs))#find block index with maximum amplitude
+    f=fid['real'].iloc[ iblk * bs : ((iblk +1 ) * bs) -1 ] + 1.j * fid['im'].iloc[ iblk * bs : ((iblk +1 ) * bs) -1 ] #calculate complex fid (iloc takes only block with maximum amplitude)
+    ft=np.fft(f,fid.index)

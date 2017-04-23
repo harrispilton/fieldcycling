@@ -224,7 +224,18 @@ def modify_doc(doc):
         filenames=[x.file() for x in sdf_list]
         filenames_df=pd.DataFrame(data=filenames,columns=['file'])
         table_source.data=ColumnDataSource.from_df(filenames_df)
-        
+
+    def export_update(attr,old,new):
+        pass
+    
+    def write_table_to_file(attr,old,new): ##FIXME
+        pass
+        path=export_text.value.strip()
+        exportdata=export_source.data
+        CustomJS(args=dict(source=export_source),
+                 code=open(join(dirname(__file__), "export_csv.js")).read())
+
+    
     def update_parameters():
         ''' callback for button
             function to call when button is clicked
@@ -322,16 +333,32 @@ def modify_doc(doc):
     filebox=TextInput(title="Filename",value="*.sdf")
     pathbox.on_change('value',table_update)
     filebox.on_change('value',table_update)
-    layout_input=column(pathbox,filebox,table)  
+    layout_input=column(pathbox,filebox,table)
+
+    # Data Out: export data from figures
+    #         & export parameters
+
+    export_source=ColumnDataSource(data=dict())
+    export_columns=[]
+    output_table=DataTable(source=export_source,columns=export_columns)
+    export_slider = Slider(start=1, end=4, value=3, step=1,callback_policy='mouseup', width=200) #do we need mouseup on this?
+    export_slider.on_change('value',export_update)
+    export_text = TextInput(title="Path",value=os.path.curdir)
+    export_button = Button(label='Export to csv',button_type="success") # FIXME Callback  doesn't work yet
+    export_button.on_click(write_table_to_file)
+ 
+    layout_output=row(column(export_slider,export_text,export_button),output_table)
+    
 
     # set the layout of the tabs
     layout_p1 = column(experiment_slider, p1,row(p2, p3), fid_slider)
     tab_relaxation = Panel(child = layout_p1, title = 'Relaxation')
     tab_parameters = Panel(child = layout_p4, title = 'Parameters')
     tab_input = Panel(child = layout_input, title = 'Data In')
+    tab_output = Panel(child = layout_output, title = 'Data Out')
 
     # initialize tabs object with 3 tabs
-    tabs = Tabs(tabs = [tab_relaxation, tab_parameters, tab_input])
+    tabs = Tabs(tabs = [tab_relaxation, tab_parameters, tab_input, tab_output])
 
     doc.add_root(tabs)
     doc.add_root(source) # i need to add source to detect changes
