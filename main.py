@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from bokeh.models.widgets import Panel, Tabs
 from bokeh.plotting import figure, ColumnDataSource
-from bokeh.palettes import Spectral5, viridis
+from bokeh.palettes import Spectral5, viridis  # @UnresolvedImport
 from bokeh.layouts import widgetbox
 from bokeh.models.widgets import Select, Button, DataTable, TableColumn, Slider, RangeSlider, TextInput#, ColumnDataSource
 from bokeh.models.callbacks import CustomJS
@@ -37,13 +37,66 @@ def create_plot_1_and_2(source_fid, source_mag_dec):
     p1.line('index', 'magnitude', source=source_fid, color='red')
 
     # create and plot figure 2
-    p2 = figure(plot_width=300, plot_height=300,
+    p2 = figure(plot_width=400, plot_height=400,
                 title='Magnetization Decay')
     p2.circle_cross('tau', 'phi_normalized', source=source_mag_dec, color="navy")
     p2.line('tau', 'fit_phi', source=source_mag_dec, color="teal")
     return p1, p2
 
 
+
+def fit_mag_decay_all(polymer, par_df):
+    p3 = figure(plot_width=400, plot_height=400,
+            title='normalized phi vs normalized tau', webgl = True,
+                y_axis_type = 'log',
+                x_axis_type = 'linear')
+
+    nr_experiments = polymer.get_number_of_experiments()
+    r1=np.zeros(nr_experiments)
+    MANY_COLORS = 0
+    p3_line_glyph=[]
+    for i in range(1, nr_experiments):
+        try:
+            par=polymer.getparameter(i)
+            fid=polymer.getfid(i)
+            # TODO: here tau axis is being calculated the 3rd time. Look if it can be simplified
+            tau= polymer.get_tau_axis(i)
+            try:
+                startpoint=polymer.getparvalue(i,'fid_range')[0]
+                endpoint=polymer.getparvalue(i,'fid_range')[1]
+            except:
+                startpoint=int(0.05*polymer.getparvalue(i,'BS'))
+                endpoint = int(0.1*polymer.getparvalue(i,'BS'))
+                polymer.addparameter(i,'fid_range',(startpoint,endpoint))
+            phi = get_mag_amplitude(fid, startpoint, endpoint,
+                                    polymer.getparameter(i)['NBLK'], polymer.getparameter(i)['BS'])
+            df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
+            df['phi_normalized']=(df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] )
+            polymer.addparameter(i,'df_magnetization',df)
+            
+            # initial values for the fit
+            p0 = [1, 2 * polymer.getparvalue(i,'T1MX'), 0]
+            df, popt = magnetization_fit(df,p0, fit_option=2)
+            polymer.addparameter(i,'amp',popt[0])
+            polymer.addparameter(i,'r1',popt[1])
+            polymer.addparameter(i,'noise',popt[2])
+            r1[i] = popt[1]
+            tau = popt[1]*df.tau
+            phi = popt[0]**-1*(df.phi_normalized - popt[2])
+            p3_df=pd.DataFrame(data=np.c_[ tau, phi ], columns=['tau', 'phi'])
+            source_p3=ColumnDataSource(data=ColumnDataSource.from_df(p3_df))
+            p3_line_glyph.append(p3.line('tau', 'phi', source=source_p3))
+            MANY_COLORS+=1
+        except KeyError:
+            print('no relaxation experiment found')
+            polymer.addparameter(i,'amp',float('NaN'))
+            polymer.addparameter(i,'r1',float('NaN'))
+            polymer.addparameter(i,'noise',float('NaN'))
+    COLORS=viridis(MANY_COLORS)
+    for ic in range(MANY_COLORS):
+        p3_line_glyph[ic].glyph.line_color=COLORS[ic]
+    par_df['r1']=r1
+    return p3
 
 #TODO: work with more than one tab in the browser: file input, multiple data analysis and manipulation tabs, file output and recent results tab
 #TODO: clean modify_doc, it is awfully crowded here...
@@ -95,19 +148,6 @@ def modify_doc(doc):
         fid, df = get_data_frames(ie)
         source_fid.data=ColumnDataSource.from_df(fid) #convert fid to bokeh format
         source_mag_dec.data = ColumnDataSource.from_df(df)
-
-    #load data:
-    polymer = load_data()
-    # initially set ie = 1
-    start_ie = 1
-    # parameters to dataframe
-    par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
-    fid, df = get_data_frames(start_ie)
-    # initialize source_fid and source_mag_dec
-    # they are being updated in following callbacks
-    source_fid = ColumnDataSource(data=ColumnDataSource.from_df(fid))
-    source_mag_dec = ColumnDataSource(data=ColumnDataSource.from_df(df))
-    p1, p2 = create_plot_1_and_2(source_fid, source_mag_dec)
 
     def plot_par():
         ''' Creates plot for the parameters '''
@@ -184,34 +224,10 @@ def modify_doc(doc):
         filenames=[x.file() for x in sdf_list]
         filenames_df=pd.DataFrame(data=filenames,columns=['file'])
         table_source.data=ColumnDataSource.from_df(filenames_df)
-
-
-    nr_experiments = polymer.get_number_of_experiments()
-    # initiate slider to choose experiment
-    experiment_slider = Slider(start=1, end=nr_experiments, value=1, step=1,callback_policy='mouseup') #select experiment by value
-    # initiate slider for the range in which fid shall be calculated
-    # select the intervall from which magneitization is calculated from fid
-    fid_slider = RangeSlider(start=1,end=polymer.getparvalue(start_ie,'BS'),
-                             range=polymer.getparvalue(start_ie,'fid_range'),
-                             step=1,callback_policy='mouseup')
-
-    source = ColumnDataSource(data=dict(value=[]))
-    # 'data' is the attribute. it's a field in source, which is a ColumnDataSource
-    # experiment_update is the callback
-    source.on_change('data',experiment_update) #source for experiment_slider
-    source2 = ColumnDataSource(data=dict(range=[], ie=[]))
-    source2.on_change('data',calculate_mag_dec)#source for fid_slider
-
-    experiment_slider.callback = CustomJS(args=dict(source=source),code="""
-        source.data = { value: [cb_obj.value] }
-    """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
-
-    fid_slider.callback=CustomJS(args=dict(source=source2),code="""
-        source.data = { range: cb_obj.range }
-    """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
-
+        
     def update_parameters():
-        ''' function to call when button is clicked
+        ''' callback for button
+            function to call when button is clicked
             for updates parameters of polymer, since they can change during evaluation '''
         par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters()
         x.options=columns
@@ -219,10 +235,53 @@ def modify_doc(doc):
         size.options=['None']+quantileable
         color.options=['None']+quantileable
 
-    # select boxes for p4
+    ### This is the start of the script ###
+    ### The callbacks are above ###
+
+    #load data:
+    polymer = load_data()
+    nr_experiments = polymer.get_number_of_experiments()
+    # initially set ie = 1
+    start_ie = 1
+    par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
+    # for the initial call get the dataframes without callback
+    # they are being updated in following callbacks
+    fid, df = get_data_frames(start_ie)
+    source_fid = ColumnDataSource(data=ColumnDataSource.from_df(fid))
+    source_mag_dec = ColumnDataSource(data=ColumnDataSource.from_df(df))
+    # initialy creates the plots p1 and p2
+    p1, p2 = create_plot_1_and_2(source_fid, source_mag_dec)
+    
+    ### initiates widgets, which will call the callback on change ###
+    # initiate slider to choose experiment
+    experiment_slider = Slider(start=1, end=nr_experiments, value=1, step=1,callback_policy='mouseup', width=800) #select experiment by value
+    # initiate slider for the range in which fid shall be calculated
+    # select the intervall from which magneitization is calculated from fid
+    fid_slider = RangeSlider(start=1,end=polymer.getparvalue(start_ie,'BS'),
+                             range=polymer.getparvalue(start_ie,'fid_range'),
+                             step=1,callback_policy='mouseup', width=800)
+
+    # initialize empty source for experiment slider
+    source = ColumnDataSource(data=dict(value=[]))
+    # 'data' is the attribute. it's a field in source, which is a ColumnDataSource
+    # initiate experiment_update which is the callback
+    source.on_change('data',experiment_update) #source for experiment_slider
+    experiment_slider.callback = CustomJS(args=dict(source=source),code="""
+        source.data = { value: [cb_obj.value] }
+    """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
+
+    # initialize empty source for fid slider, same as above
+    source2 = ColumnDataSource(data=dict(range=[], ie=[]))
+    source2.on_change('data',calculate_mag_dec)
+    fid_slider.callback=CustomJS(args=dict(source=source2),code="""
+        source.data = { range: cb_obj.range }
+    """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
+
+    # same for the update button
     button_scan = Button(label='Scan Parameters',button_type="success")
     button_scan.on_click(update_parameters)
-
+    
+    # here comes for callbacks for x, y, size, color
     x = Select(title='X-Axis', value='ZONE', options=columns)
     x.on_change('value', update)
 
@@ -238,58 +297,9 @@ def modify_doc(doc):
     controls_p4 = widgetbox([button_scan, x,y,color,size], width=150)
     layout_p4 = row(controls_p4,plot_par())
 
-    #fitting on all experiments
-    p3 = figure(plot_width=300, plot_height=300,
-            title='normalized phi vs normalized tau', webgl = True,
-                y_axis_type = 'log',
-                x_axis_type = 'linear')
 
-    #fit magnetization decay for all experiments
-    nr_experiments = polymer.get_number_of_experiments()
-    r1=np.zeros(nr_experiments)
-    MANY_COLORS = 0
-    p3_line_glyph=[]
-    for i in range(1, nr_experiments):
-        try:
-            par=polymer.getparameter(i)
-            fid=polymer.getfid(i)
-            # TODO: here tau axis is being calculated the 3rd time. Look if it can be simplified
-            tau= polymer.get_tau_axis(i)
-            try:
-                startpoint=polymer.getparvalue(i,'fid_range')[0]
-                endpoint=polymer.getparvalue(i,'fid_range')[1]
-            except:
-                startpoint=int(0.05*polymer.getparvalue(i,'BS'))
-                endpoint = int(0.1*polymer.getparvalue(i,'BS'))
-                polymer.addparameter(i,'fid_range',(startpoint,endpoint))
-            phi = get_mag_amplitude(fid, startpoint, endpoint,
-                                    polymer.getparameter(i)['NBLK'], polymer.getparameter(i)['BS'])
-            df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
-            df['phi_normalized']=(df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] )
-            polymer.addparameter(i,'df_magnetization',df)
-            
-            # initial values for the fit
-            p0 = [1, 2 * polymer.getparvalue(i,'T1MX'), 0]
-            df, popt = magnetization_fit(df,p0, fit_option=2)
-            polymer.addparameter(i,'amp',popt[0])
-            polymer.addparameter(i,'r1',popt[1])
-            polymer.addparameter(i,'noise',popt[2])
-            r1[i] = popt[1]
-            tau = popt[1]*df.tau
-            phi = popt[0]**-1*(df.phi_normalized - popt[2])
-            p3_df=pd.DataFrame(data=np.c_[ tau, phi ], columns=['tau', 'phi'])
-            source_p3=ColumnDataSource(data=ColumnDataSource.from_df(p3_df))
-            p3_line_glyph.append(p3.line('tau', 'phi', source=source_p3))
-            MANY_COLORS+=1
-        except KeyError:
-            print('no relaxation experiment found')
-            polymer.addparameter(i,'amp',float('NaN'))
-            polymer.addparameter(i,'r1',float('NaN'))
-            polymer.addparameter(i,'noise',float('NaN'))
-    COLORS=viridis(MANY_COLORS)
-    for ic in range(MANY_COLORS):
-        p3_line_glyph[ic].glyph.line_color=COLORS[ic]
-    par_df['r1']=r1
+    # fit magnetization decay for all experiments
+    p3 = fit_mag_decay_all(polymer, par_df)
 
     ####
     #### TODO: write file input
@@ -310,12 +320,12 @@ def modify_doc(doc):
     table=DataTable(source=table_source,columns=t_columns)
     pathbox=TextInput(title="Path",value=os.path.curdir)
     filebox=TextInput(title="Filename",value="*.sdf")
-    layout_input=column(pathbox,filebox,table)  
     pathbox.on_change('value',table_update)
     filebox.on_change('value',table_update)
+    layout_input=column(pathbox,filebox,table)  
 
     # set the layout of the tabs
-    layout_p1 = column(experiment_slider, p1,fid_slider, p2, p3)
+    layout_p1 = column(experiment_slider, p1,row(p2, p3), fid_slider)
     tab_relaxation = Panel(child = layout_p1, title = 'Relaxation')
     tab_parameters = Panel(child = layout_p4, title = 'Parameters')
     tab_input = Panel(child = layout_input, title = 'Data In')
