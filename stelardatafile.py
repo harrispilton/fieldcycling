@@ -6,10 +6,11 @@ import numpy.matlib
 import pandas as pd
 from num_string_eval import NumericStringParser
 from utils import freq_shift
-
+import logging
 
 class StelarDataFile:
-    def __init__(self, FileName, PathName):
+    def __init__(self, FileName, PathName, logger=None):
+        self.logger = logger or logging.getLogger(__name__)
         self.FileName=FileName
         self.PathName=PathName
         self.options='standard'
@@ -74,7 +75,6 @@ class StelarDataFile:
         T1MX = parameters['T1MX'] # T1MX is used in the 'eval' expressions below
         # TODO: not tested yet for all cases
         if parameters['BGRD'] == 'LIST':
-            print('BGRD = LIST')
             temp = parameters['BLST']
             temp.replace(';', ':')
             sep_indices = [pos for pos, char in enumerate(temp) if char == ':'] # find indices of ':'
@@ -89,12 +89,10 @@ class StelarDataFile:
             x = numpy.matlib.repmat(listx,1,nrep) # re-create the time vector
             x = x[:nblk] # select the portion corresponding to the number of blocs (needed if npts~=nblk)
         elif parameters['BGRD'] == 'LIN':
-            print('BGRD = LIN')
             Tini = nsp.eval(parameters['BINI'].replace('T1MX', str(T1MX)))
             Tend = nsp.eval(parameters['BEND'].replace('T1MX', str(T1MX)))
             x = np.linspace(Tini, Tend, nblk) # re-create the time vector
         elif parameters['BGRD'] == 'LOG':
-            print('BGRD = LOG')
             Tini_Tend = [0, 0]
             # This has to be so complicated b/c of mixed datatype that is possible for parameters['BGRD'].
             # Documentation would be beneficial, what can occur
@@ -159,7 +157,7 @@ class StelarDataFile:
             while 'DATA' not in words[0]:
                 words = fid.readline().split('\t')
                 if not words[0]: #probably eof reached
-                    print('probably end of file reached')
+                    self.logger.info('probably end of file reached')
                     break #escape the while loop
                 #read the parameters of file
                 if len(words)==2:
@@ -179,7 +177,7 @@ class StelarDataFile:
                         try:
                             parameters['TIME']=pd.to_datetime(words[1])
                         except:
-                            print('TIME is not in datetime Format')
+                            self.logger.warning('TIME is not in datetime Format')
                 try:
                     if 'DATA' in words[0]:
                         data=[]
@@ -197,6 +195,6 @@ class StelarDataFile:
                         words[0]='bla'
                         parameters=dict()
                 except KeyError:
-                    print('fastforward') #no experiment found
-        print(str(ie-1)+' experiments read')
+                    self.logger.warning('fastforward') #no experiment found
+        self.logger.info('{} experiments read'.format(ie-1))
         os.chdir(olddir)

@@ -15,9 +15,24 @@ from bokeh.application import Application
 from bokeh.layouts import column, row
 #from bokeh.models import ColumnDataSource#, Slider, RangeSlider, TextInput
 from bokeh.server.server import Server
-import stelardatafile as sdf
-from utils import model_exp_dec, fun_exp_dec, get_mag_amplitude, magnetization_fit
 from scipy.optimize import leastsq
+import logging
+
+from utils import model_exp_dec, fun_exp_dec, get_mag_amplitude, magnetization_fit
+import stelardatafile as sdf
+
+# Set up a logger.
+logger = logging.getLogger(__name__)
+#set this to loggin.INFO if the console gets to crowded
+logger.setLevel(logging.DEBUG)
+# create a file handler
+handler = logging.FileHandler('logfile.log')
+handler.setLevel(logging.INFO)
+# create a logging format
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s')
+handler.setFormatter(formatter)
+# add the handlers to the logger
+logger.addHandler(handler)
 
 # in the plot 4 use following impo
 SIZES = list(range(6, 22, 3)) # for some sizes
@@ -25,6 +40,7 @@ COLORS = Spectral5 # for some colors (more colors would be nice somehow)
 
 
 def create_plot_1_and_2(source_fid, source_mag_dec):
+    logger.debug('creating plot 1 and 2')
     # create and plot figure 1
     p1 = figure(plot_width=800, plot_height=500,
                 title='Free Induction Decay', webgl=True,
@@ -46,6 +62,7 @@ def create_plot_1_and_2(source_fid, source_mag_dec):
 
 
 def fit_mag_decay_all(polymer, par_df):
+    logger.debug('fitting all mag decay')
     p3 = figure(plot_width=400, plot_height=400,
             title='normalized phi vs normalized tau', webgl = True,
                 y_axis_type = 'log',
@@ -88,7 +105,7 @@ def fit_mag_decay_all(polymer, par_df):
             p3_line_glyph.append(p3.line('tau', 'phi', source=source_p3))
             MANY_COLORS+=1
         except KeyError:
-            print('no relaxation experiment found')
+            logger.warning('no relaxation experiment found')
             polymer.addparameter(i,'amp',float('NaN'))
             polymer.addparameter(i,'r1',float('NaN'))
             polymer.addparameter(i,'noise',float('NaN'))
@@ -101,7 +118,9 @@ def fit_mag_decay_all(polymer, par_df):
 #TODO: work with more than one tab in the browser: file input, multiple data analysis and manipulation tabs, file output and recent results tab
 #TODO: clean modify_doc, it is awfully crowded here...
 def modify_doc(doc):
+    logger.debug('modify_doc has been called')
     def get_data_frames(ie,):
+        logger.debug('get_dataframe with ie={}'.format(ie))
         fid = polymer.getfid(ie) #read FID or series of FIDs for selected experiment
         try:
             # TODO: merge this with the initial plot. Now its doubled in the code
@@ -113,6 +132,7 @@ def modify_doc(doc):
                 # fid_slider not initialized for first plot. Use default values:
                 startpoint=int(0.05*polymer.getparvalue(ie,'BS'))
                 endpoint = int(0.1*polymer.getparvalue(ie,'BS'))
+                logger.debug('fid_slider not initialized for first plot. Use default values {} and {}.'.format(startpoint, endpoint))
                 
             polymer.addparameter(ie,'fid_range',(startpoint,endpoint)) #add integration range to parameters to make it accesible
             phi = get_mag_amplitude(fid, startpoint, endpoint,
@@ -127,9 +147,9 @@ def modify_doc(doc):
             p0=[1.0, polymer.getparvalue(ie,'T1MX')**-1*2, 0] #choose startparameters for fitting an exponential decay
             df, popt = magnetization_fit(df, p0, fit_option) # use leastsq to find optimal parameters
             polymer.addparameter(ie,'popt(mono_exp)',popt) # add fitting parameters for later access
-            print(popt) # print the fitting parameters to console (for convenience)
+            logger.info('fitfunction(t) = {} * exp(- {} * t) + {}'.format(*popt)) # print the fitting parameters to console (for convenience)
         except KeyError:
-            print('no relaxation experiment found')
+            logger.warning('no relaxation experiment found')
             tau=np.zeros(1)
             phi=np.zeros(1)
             df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
@@ -145,12 +165,14 @@ def modify_doc(doc):
             writes source_mag_dec.data from the dataframe
             '''
         ie = experiment_slider.value   #get expermient number from the slider
+        logger.debug('calculate mag_dec for ie={}'.format(ie))
         fid, df = get_data_frames(ie)
         source_fid.data=ColumnDataSource.from_df(fid) #convert fid to bokeh format
         source_mag_dec.data = ColumnDataSource.from_df(df)
 
     def plot_par():
         ''' Creates plot for the parameters '''
+        logger.debug('creating plot for the parameters')
         # TODO: what is x here
         xs = par_df[x.value ].values
         ys = par_df[y.value].values
@@ -199,6 +221,7 @@ def modify_doc(doc):
         """ Callback for the experiment chooser
         """
         ie = experiment_slider.value
+        logger.debug('Callback experiment update, ie={}'.format(ie))
         fid_slider.end = polymer.getparvalue(ie,'BS')
         try:
             fid_slider.range=polymer.getparvalue(ie,'fid_range')
@@ -210,11 +233,11 @@ def modify_doc(doc):
         
     def table_update(attr,old,new):
         ''' callback for loading of data '''
-        print('Hello table')
+        logger.debug('callback for loading of data ')
         path=pathbox.value.strip()
         file=filebox.value.strip()
         if file=="*.sdf":
-            print('hello IF')
+            logger.info('callback for loading data. filename: {}'.format(file))
             allsdf=filter(lambda x: x.endswith('.sdf'),os.listdir(path))
             for f in allsdf:
                 sdf_list.append(sdf.StelarDataFile(f,path))
@@ -240,6 +263,7 @@ def modify_doc(doc):
         ''' callback for button
             function to call when button is clicked
             for updates parameters of polymer, since they can change during evaluation '''
+        logger.debug('callback for button (update parameter).')
         par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters()
         x.options=columns
         y.options=columns
@@ -368,7 +392,7 @@ def load_data():
     #specify and import data file
     path=os.path.join(os.path.curdir,'data')
     # initialize StelarDataFile Object
-    polymer=sdf.StelarDataFile('glyzerin_d3_300K.sdf',path)
+    polymer=sdf.StelarDataFile('glyzerin_d3_300K.sdf',path, logger=logger)
     polymer.sdfimport()
     nr_experiments = polymer.get_number_of_experiments()
     polymer.rephase_fids()
@@ -377,7 +401,7 @@ def load_data():
 def main():
     bokeh_app = Application(FunctionHandler(modify_doc))
     io_loop = IOLoop.current()
-    print('Opening Bokeh application on http://localhost:5006/')
+    logger.info('Opening Bokeh application on http://localhost:5006/')
     server = Server({'/': bokeh_app}, io_loop=io_loop)
     server.start()
     io_loop.add_callback(server.show, "/")

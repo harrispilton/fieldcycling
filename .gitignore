@@ -6,3 +6,4 @@ __pycache__/*
 .pydevproject
 .settings
 *html
+logfile.log
