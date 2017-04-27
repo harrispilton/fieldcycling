@@ -36,7 +36,7 @@ logger.addHandler(handler)
 
 # in the plot 4 use following impo
 SIZES = list(range(6, 22, 3)) # for some sizes
-COLORS = Spectral5 # for some colors (more colors would be nice somehow)
+COLORS = Spectral5 # for some colors (for more colors use viridis(integer))
 
 
 def create_plot_1_and_2(source_fid, source_mag_dec):
@@ -76,14 +76,14 @@ def fit_mag_decay_all(polymer, par_df):
         try:
             par=polymer.getparameter(i)
             fid=polymer.getfid(i)
-            # TODO: here tau axis is being calculated the 3rd time. Look if it can be simplified
-            tau= polymer.get_tau_axis(i)
+            tau= polymer.get_tau_axis(i) # tau axis could be parameter created right after import
             try:
                 startpoint=polymer.getparvalue(i,'fid_range')[0]
-                endpoint=polymer.getparvalue(i,'fid_range')[1]
+                endpoint=polymer.getparvalue(i,'fid_range')[1] 
             except:
                 startpoint=int(0.05*polymer.getparvalue(i,'BS'))
                 endpoint = int(0.1*polymer.getparvalue(i,'BS'))
+                logger.warning('using preset range (from {startpoint} to {endpoint}) in experiment {i}'.format(**locals()))
                 polymer.addparameter(i,'fid_range',(startpoint,endpoint))
             phi = get_mag_amplitude(fid, startpoint, endpoint,
                                     polymer.getparameter(i)['NBLK'], polymer.getparameter(i)['BS'])
@@ -169,53 +169,72 @@ def modify_doc(doc):
         fid, df = get_data_frames(ie)
         source_fid.data=ColumnDataSource.from_df(fid) #convert fid to bokeh format
         source_mag_dec.data = ColumnDataSource.from_df(df)
+        
+    def p3_update():
+        logger.debug('update plot 3')
+        p3 = fit_mag_decay_all(polymer,par_df)
+        return p3
 
     def plot_par():
         ''' Creates plot for the parameters '''
         logger.debug('creating plot for the parameters')
-        # TODO: what is x here
-        xs = par_df[x.value ].values
-        ys = par_df[y.value].values
-        x_title = x.value.title()
-        y_title = y.value.title()
 
-        kw = dict() #holds optional keyword arguments for figure()
-        if x.value in discrete:
+        # read data due to selection of select_x/y
+        xs = par_df[select_xaxis.value ].values
+        ys = par_df[select_yaxis.value].values
+        # read titles due to name of select_x/y
+        x_title = select_xaxis.value.title()
+        y_title = select_yaxis.value.title()
+
+        # remark: many attributes in a bokeh plot cannot be modified after initialization
+        #         for example p4.x_axis_type='datetime' does not work. keywords are a
+        #         workaround to pass all optional arguments initially
+        # set optional keyword arguments, kw, for figure()
+        kw = dict() #initialize
+        if select_xaxis.value in discrete:
             kw['x_range'] = sorted(set(xs))
-        if y.value in discrete:
+        if select_yaxis.value in discrete:
             kw['y_range'] = sorted(set(ys))
-        if y.value in time:
+        if select_yaxis.value in time:
             kw['y_axis_type'] = 'datetime'
-        if x.value in time:
+        if select_xaxis.value in time:
             kw['x_axis_type'] = 'datetime'
-        
         kw['title']="%s vs %s" % (x_title, y_title)
-
+        # create figure using optional keywords kw
         p4 = figure(plot_height=300, plot_width=600, tools='pan,box_zoom,reset',
                     **kw)
-
+        # set axis label
         p4.xaxis.axis_label = x_title
         p4.yaxis.axis_label = y_title
 
-        if x.value in discrete:
+        # strings at x axis ticks need a lot of space. solution: rotate label orientation
+        if select_xaxis.value in discrete:
             p4.xaxis.major_label_orientation = pd.np.pi / 4 # rotates labels...
 
+        # standard size of symbols
         sz = 9
-        if size.value != 'None':
-            groups = pd.qcut(pd.to_numeric(par_df[size.value].values), len(SIZES))
+        # custom size of symbols due to select_size
+        if select_size.value != 'None':
+            groups = pd.qcut(pd.to_numeric(par_df[select_size.value].values), len(SIZES))
             sz = [SIZES[xx] for xx in groups.codes]
 
-        c = "#31AADE"
-        if color.value != 'None':
-            groups = pd.qcut(pd.to_numeric(par_df[color.value]).values, len(COLORS))
+        # standard color
+        c = "#31AADE"        
+        # custom color due to select_color
+        if select_color.value != 'None':
+            groups = pd.qcut(pd.to_numeric(par_df[select_color.value]).values, len(COLORS))
             c = [COLORS[xx] for xx in groups.codes]
-       
+
+        # create the plot using circles
         p4.circle(x=xs, y=ys, color=c, size=sz, line_color="white", alpha=0.6, hover_color='white', hover_alpha=0.5)
-        return p4
+        return p4 #return the plot
     
-    def update(attr, old, new):
+    def select_update(attr, old, new):
         ''' Callback for update of figure 1 in parameters tab '''
         tabs.tabs[1].child.children[1] = plot_par()
+        print(tabs.tabs[1].child.children[1])
+        logger.debug('Parameter plot updated')
+#        p4 = plot_par()
 
     def experiment_update(attr, old, new):
         """ Callback for the experiment chooser
@@ -249,14 +268,15 @@ def modify_doc(doc):
         table_source.data=ColumnDataSource.from_df(filenames_df)
 
     def export_update(attr,old,new):
+        logger.debug('export_update has been called ')
         pass
     
     def write_table_to_file(attr,old,new): ##FIXME
-        pass
-        path=export_text.value.strip()
-        exportdata=export_source.data
-        CustomJS(args=dict(source=export_source),
-                 code=open(join(dirname(__file__), "export_csv.js")).read())
+        logger.debug('write_table_to_file has been called ')
+#        path=export_text.value.strip()
+#        exportdata=export_source.data
+#        CustomJS(args=dict(source=export_source),
+#                 code=open(join(dirname(__file__), "export_csv.js")).read())
 
     
     def update_parameters():
@@ -265,10 +285,10 @@ def modify_doc(doc):
             for updates parameters of polymer, since they can change during evaluation '''
         logger.debug('callback for button (update parameter).')
         par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters()
-        x.options=columns
-        y.options=columns
-        size.options=['None']+quantileable
-        color.options=['None']+quantileable
+        select_xaxis.options=columns
+        select_yaxis.options=columns
+        select_size.options=['None']+quantileable
+        select_color.options=['None']+quantileable
 
     ### This is the start of the script ###
     ### The callbacks are above ###
@@ -294,7 +314,13 @@ def modify_doc(doc):
     # select the intervall from which magneitization is calculated from fid
     fid_slider = RangeSlider(start=1,end=polymer.getparvalue(start_ie,'BS'),
                              range=polymer.getparvalue(start_ie,'fid_range'),
-                             step=1,callback_policy='mouseup', width=800)
+                             step=1,callback_policy='mouseup', width=400)
+
+    # fit magnetization decay for all experiments
+    p3 = fit_mag_decay_all(polymer, par_df)
+    # refit mag dec with updated ranges after button push
+    button_refit = Button(label='Update',button_type="success")
+    button_refit.on_click(p3_update)
 
     # initialize empty source for experiment slider
     source = ColumnDataSource(data=dict(value=[]))
@@ -317,24 +343,22 @@ def modify_doc(doc):
     button_scan.on_click(update_parameters)
     
     # here comes for callbacks for x, y, size, color
-    x = Select(title='X-Axis', value='ZONE', options=columns)
-    x.on_change('value', update)
+    select_xaxis = Select(title='X-Axis', value='ZONE', options=columns)
+    select_xaxis.on_change('value', select_update)
 
-    y = Select(title='Y-Axis', value='TIME', options=columns)
-    y.on_change('value', update)
+    select_yaxis = Select(title='Y-Axis', value='TIME', options=columns)
+    select_yaxis.on_change('value', select_update)
 
-    size = Select(title='Size', value='None', options=['None'] + quantileable)
-    size.on_change('value', update)
+    select_size = Select(title='Size', value='None', options=['None'] + quantileable)
+    select_size.on_change('value', select_update)
 
-    color = Select(title='Color', value='None', options=['None'] + quantileable)
-    color.on_change('value', update)
+    select_color = Select(title='Color', value='None', options=['None'] + quantileable)
+    select_color.on_change('value', select_update)
 
-    controls_p4 = widgetbox([button_scan, x,y,color,size], width=150)
+    controls_p4 = widgetbox([button_scan, select_xaxis,select_yaxis,select_color,select_size], width=150)
+    #p4 = plot_par()
     layout_p4 = row(controls_p4,plot_par())
-
-
-    # fit magnetization decay for all experiments
-    p3 = fit_mag_decay_all(polymer, par_df)
+    logger.debug('layout for parameter plot created')
 
     ####
     #### TODO: write file input
@@ -372,21 +396,29 @@ def modify_doc(doc):
     export_button.on_click(write_table_to_file)
  
     layout_output=row(column(export_slider,export_text,export_button),output_table)
+    print('after layout_output')
     
 
     # set the layout of the tabs
-    layout_p1 = column(experiment_slider, p1,row(p2, p3), fid_slider)
+    layout_p1 = column(experiment_slider, p1,
+                       row(
+                           column(fid_slider,p2),
+                           column(button_refit, p3)
+                           ),
+                       )
     tab_relaxation = Panel(child = layout_p1, title = 'Relaxation')
     tab_parameters = Panel(child = layout_p4, title = 'Parameters')
     tab_input = Panel(child = layout_input, title = 'Data In')
     tab_output = Panel(child = layout_output, title = 'Data Out')
 
     # initialize tabs object with 3 tabs
-    tabs = Tabs(tabs = [tab_relaxation, tab_parameters, tab_input, tab_output])
-
+    tabs = Tabs(tabs = [tab_relaxation, tab_parameters,
+                        tab_input, tab_output])
+    print('tabs')
     doc.add_root(tabs)
     doc.add_root(source) # i need to add source to detect changes
     doc.add_root(source2)
+    print('tab tab')
 
 def load_data():
     #specify and import data file
@@ -405,6 +437,8 @@ def main():
     server = Server({'/': bokeh_app}, io_loop=io_loop)
     server.start()
     io_loop.add_callback(server.show, "/")
+    
+    print('server')
     io_loop.start()
 
 if __name__ == '__main__':
