@@ -114,6 +114,7 @@ class StelarDataFile:
         self.adddata(ie,parameter,data)
 
     def rephase_fids(self):
+        self.logger.debug('called rephase_fids')
         for ie in range(1,self.get_number_of_experiments()):
             fid=self.getfid(ie)
             phase=0 #rephase in deg

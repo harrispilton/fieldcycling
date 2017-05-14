@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding: UTF-8 -*-
 import os
+import os.path as osp
 import pandas as pd
 import numpy as np
 from bokeh.models.widgets import Panel, Tabs
@@ -38,6 +39,18 @@ logger.addHandler(handler)
 SIZES = list(range(6, 22, 3)) # for some sizes
 COLORS = Spectral5 # for some colors (for more colors use viridis(integer))
 
+def load_data(sdf_file, path=None):
+    # TODO: give path as a parameter to use this function for other datafiles
+    #specify and import data file
+    if not path:
+        path=os.path.join(os.path.curdir,'data') # default path, if it's not set as an argument
+    # initialize StelarDataFile Object
+    polymer=sdf.StelarDataFile(sdf_file, path, logger=logger)
+    polymer.sdfimport()
+    nr_experiments = polymer.get_number_of_experiments()
+    logger.info('Loaded {} ({} Experiments)'.format(osp.join(path, sdf_file), nr_experiments))
+    polymer.rephase_fids()
+    return polymer
 
 def create_plot_1_and_2(source_fid, source_mag_dec):
     logger.debug('creating plot 1 and 2')
@@ -58,8 +71,6 @@ def create_plot_1_and_2(source_fid, source_mag_dec):
     p2.circle_cross('tau', 'phi_normalized', source=source_mag_dec, color="navy")
     p2.line('tau', 'fit_phi', source=source_mag_dec, color="teal")
     return p1, p2
-
-
 
 def fit_mag_decay_all(polymer, par_df):
     logger.debug('fitting all mag decay')
@@ -115,15 +126,23 @@ def fit_mag_decay_all(polymer, par_df):
     par_df['r1']=r1
     return p3
 
-#TODO: work with more than one tab in the browser: file input, multiple data analysis and manipulation tabs, file output and recent results tab
-#TODO: clean modify_doc, it is awfully crowded here...
 def modify_doc(doc):
+    """ Contains the application, including all callbacks
+        TODO: could the callbacks be outsourced?
+    :param doc:
+    :type doc:
+    """
     logger.debug('modify_doc has been called')
     def get_data_frames(ie,):
+        """ Called one time initially, and then every time the experiment number is changed by the slider
+        :param ie: experiment number
+        :type ie: int
+        :returns: dataframe from stella datafile and dataframe with tau and phi and fitted values
+        :rtype: list of 2 pandas dataframes
+        """
         logger.debug('get_dataframe with ie={}'.format(ie))
         fid = polymer.getfid(ie) #read FID or series of FIDs for selected experiment
         try:
-            # TODO: merge this with the initial plot. Now its doubled in the code
             tau = polymer.get_tau_axis(ie) #numpy array containing the taus for experiment ie
             try:
                 startpoint=fid_slider.range[0] #lower integration bound
@@ -169,14 +188,10 @@ def modify_doc(doc):
         fid, df = get_data_frames(ie)
         source_fid.data=ColumnDataSource.from_df(fid) #convert fid to bokeh format
         source_mag_dec.data = ColumnDataSource.from_df(df)
-        
-    def p3_update():
-        logger.debug('update plot 3')
-        p3 = fit_mag_decay_all(polymer,par_df)
-        return p3
 
     def plot_par():
-        ''' Creates plot for the parameters '''
+        ''' Creates plot for the parameters 
+            Called with every update from the callback'''
         logger.debug('creating plot for the parameters')
 
         # read data due to selection of select_x/y
@@ -229,14 +244,19 @@ def modify_doc(doc):
         p4.circle(x=xs, y=ys, color=c, size=sz, line_color="white", alpha=0.6, hover_color='white', hover_alpha=0.5)
         return p4 #return the plot
     
-    def select_update(attr, old, new):
+    def callback_update_plot_1(attr, old, new):
         ''' Callback for update of figure 1 in parameters tab '''
         tabs.tabs[1].child.children[1] = plot_par()
         print(tabs.tabs[1].child.children[1])
         logger.debug('Parameter plot updated')
 #        p4 = plot_par()
 
-    def experiment_update(attr, old, new):
+    def callback_update_p3():
+        logger.debug('update plot 3')
+        p3 = fit_mag_decay_all(polymer,par_df)
+        return p3
+
+    def callback_update_experiment(attr, old, new):
         """ Callback for the experiment chooser
         """
         ie = experiment_slider.value
@@ -250,9 +270,11 @@ def modify_doc(doc):
             fid_slider.range=(startpoint,endpoint)
         calculate_mag_dec(attr,old,new)
         
-    def table_update(attr,old,new):
+    def callback_load_more_data(attr,old,new):
         ''' callback for loading of data '''
+        # TODO: implement
         logger.debug('callback for loading of data ')
+        logger.error('Not implemented!')
         path=pathbox.value.strip()
         file=filebox.value.strip()
         if file=="*.sdf":
@@ -267,19 +289,21 @@ def modify_doc(doc):
         filenames_df=pd.DataFrame(data=filenames,columns=['file'])
         table_source.data=ColumnDataSource.from_df(filenames_df)
 
-    def export_update(attr,old,new):
-        logger.debug('export_update has been called ')
+    def callback_export_data(attr,old,new):
+        logger.debug('callback_export_data has been called ')
+        logger.error('Not implemented!')
         pass
     
-    def write_table_to_file(attr,old,new): ##FIXME
-        logger.debug('write_table_to_file has been called ')
+    def callback_write_table_to_file(attr,old,new): ##FIXME
+        logger.debug('callback_write_table_to_file has been called ')
+        logger.error('Not implemented!')
+        pass
 #        path=export_text.value.strip()
 #        exportdata=export_source.data
 #        CustomJS(args=dict(source=export_source),
 #                 code=open(join(dirname(__file__), "export_csv.js")).read())
 
-    
-    def update_parameters():
+    def callback_update_parameters():
         ''' callback for button
             function to call when button is clicked
             for updates parameters of polymer, since they can change during evaluation '''
@@ -290,14 +314,19 @@ def modify_doc(doc):
         select_size.options=['None']+quantileable
         select_color.options=['None']+quantileable
 
+    logger.info('Starting the script')
     ### This is the start of the script ###
     ### The callbacks are above ###
 
     #load data:
-    polymer = load_data()
+    # TODO: how to handle multiple datafiles?
+    # New Tab for each datafile?
+    # dropdown selection to choose datafile
+    # complete new start of process? (probably not prefered)
+
+    polymer = load_data('glyzerin_d3_300K.sdf')
     nr_experiments = polymer.get_number_of_experiments()
-    # initially set ie = 1
-    start_ie = 1
+    start_ie = 1     # initially set ie = 1
     par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
     # for the initial call get the dataframes without callback
     # they are being updated in following callbacks
@@ -320,13 +349,13 @@ def modify_doc(doc):
     p3 = fit_mag_decay_all(polymer, par_df)
     # refit mag dec with updated ranges after button push
     button_refit = Button(label='Update',button_type="success")
-    button_refit.on_click(p3_update)
+    button_refit.on_click(callback_update_p3)
 
     # initialize empty source for experiment slider
     source = ColumnDataSource(data=dict(value=[]))
     # 'data' is the attribute. it's a field in source, which is a ColumnDataSource
-    # initiate experiment_update which is the callback
-    source.on_change('data',experiment_update) #source for experiment_slider
+    # initiate callback_update_experiment which is the callback
+    source.on_change('data',callback_update_experiment) #source for experiment_slider
     experiment_slider.callback = CustomJS(args=dict(source=source),code="""
         source.data = { value: [cb_obj.value] }
     """)#unfortunately this customjs is needed to throttle the callback in current version of bokeh
@@ -340,20 +369,20 @@ def modify_doc(doc):
 
     # same for the update button
     button_scan = Button(label='Scan Parameters',button_type="success")
-    button_scan.on_click(update_parameters)
+    button_scan.on_click(callback_update_parameters)
     
     # here comes for callbacks for x, y, size, color
     select_xaxis = Select(title='X-Axis', value='ZONE', options=columns)
-    select_xaxis.on_change('value', select_update)
+    select_xaxis.on_change('value', callback_update_plot_1)
 
     select_yaxis = Select(title='Y-Axis', value='TIME', options=columns)
-    select_yaxis.on_change('value', select_update)
+    select_yaxis.on_change('value', callback_update_plot_1)
 
     select_size = Select(title='Size', value='None', options=['None'] + quantileable)
-    select_size.on_change('value', select_update)
+    select_size.on_change('value', callback_update_plot_1)
 
     select_color = Select(title='Color', value='None', options=['None'] + quantileable)
-    select_color.on_change('value', select_update)
+    select_color.on_change('value', callback_update_plot_1)
 
     controls_p4 = widgetbox([button_scan, select_xaxis,select_yaxis,select_color,select_size], width=150)
     #p4 = plot_par()
@@ -369,6 +398,7 @@ def modify_doc(doc):
     # load more data:
     table_source=ColumnDataSource(data=dict())
     sdf_list=[polymer]
+    # TODO: This is current plan, to save the different dataframes in a list, right?
     filenames=[x.file() for x in sdf_list]
     files_df=pd.DataFrame(data=filenames,columns=['file'])
     table_source.data=ColumnDataSource.from_df(files_df)
@@ -379,8 +409,8 @@ def modify_doc(doc):
     table=DataTable(source=table_source,columns=t_columns)
     pathbox=TextInput(title="Path",value=os.path.curdir)
     filebox=TextInput(title="Filename",value="*.sdf")
-    pathbox.on_change('value',table_update)
-    filebox.on_change('value',table_update)
+    pathbox.on_change('value',callback_load_more_data)
+    filebox.on_change('value',callback_load_more_data)
     layout_input=column(pathbox,filebox,table)
 
     # Data Out: export data from figures
@@ -390,10 +420,10 @@ def modify_doc(doc):
     export_columns=[]
     output_table=DataTable(source=export_source,columns=export_columns)
     export_slider = Slider(start=1, end=4, value=3, step=1,callback_policy='mouseup', width=200) #do we need mouseup on this?
-    export_slider.on_change('value',export_update)
+    export_slider.on_change('value',callback_export_data)
     export_text = TextInput(title="Path",value=os.path.curdir)
     export_button = Button(label='Export to csv',button_type="success") # FIXME Callback  doesn't work yet
-    export_button.on_click(write_table_to_file)
+    export_button.on_click(callback_write_table_to_file)
  
     layout_output=row(column(export_slider,export_text,export_button),output_table)
     print('after layout_output')
@@ -419,16 +449,6 @@ def modify_doc(doc):
     doc.add_root(source) # i need to add source to detect changes
     doc.add_root(source2)
     print('tab tab')
-
-def load_data():
-    #specify and import data file
-    path=os.path.join(os.path.curdir,'data')
-    # initialize StelarDataFile Object
-    polymer=sdf.StelarDataFile('glyzerin_d3_300K.sdf',path, logger=logger)
-    polymer.sdfimport()
-    nr_experiments = polymer.get_number_of_experiments()
-    polymer.rephase_fids()
-    return polymer
 
 def main():
     bokeh_app = Application(FunctionHandler(modify_doc))
