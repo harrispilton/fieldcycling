@@ -133,48 +133,60 @@ def modify_doc(doc):
     :type doc:
     """
     logger.debug('modify_doc has been called')
+    def load_polymer(filename='glyzerin_d3_300K.sdf', path=None):
+        # load this datafile initially:
+        polymer = load_data()
+        start_ie = 1     # initially set ie = 1
+        par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
+        # for the initial call get the dataframes without callback
+        # they are being updated in following callbacks
+        fid, df = get_data_frames(start_ie)
+        source_fid = ColumnDataSource(data=ColumnDataSource.from_df(fid))
+        source_mag_dec = ColumnDataSource(data=ColumnDataSource.from_df(df))
+        return polymer, source_fid, source_mag_dec, par_df, columns, discrete, continuous, time, quantileable, start_ie
+
     def get_data_frames(ie,):
-        """ Called one time initially, and then every time the experiment number is changed by the slider
-        :param ie: experiment number
-        :type ie: int
-        :returns: dataframe from stella datafile and dataframe with tau and phi and fitted values
-        :rtype: list of 2 pandas dataframes
-        """
-        logger.debug('get_dataframe with ie={}'.format(ie))
-        fid = polymer.getfid(ie) #read FID or series of FIDs for selected experiment
-        try:
-            tau = polymer.get_tau_axis(ie) #numpy array containing the taus for experiment ie
+            """ Called one time initially, and then every time the experiment number is changed by the slider
+            :param ie: experiment number
+            :type ie: int
+            :returns: dataframe from stella datafile and dataframe with tau and phi and fitted values
+            :rtype: list of 2 pandas dataframes
+            """
+            logger.debug('get_dataframe with ie={}'.format(ie))
+            fid = polymer.getfid(ie) #read FID or series of FIDs for selected experiment
             try:
-                startpoint=fid_slider.range[0] #lower integration bound
-                endpoint = fid_slider.range[1] #upper integration bound
-            except NameError:
-                # fid_slider not initialized for first plot. Use default values:
-                startpoint=int(0.05*polymer.getparvalue(ie,'BS'))
-                endpoint = int(0.1*polymer.getparvalue(ie,'BS'))
-                logger.debug('fid_slider not initialized for first plot. Use default values {} and {}.'.format(startpoint, endpoint))
-                
-            polymer.addparameter(ie,'fid_range',(startpoint,endpoint)) #add integration range to parameters to make it accesible
-            phi = get_mag_amplitude(fid, startpoint, endpoint,
-                                    polymer.getparvalue(ie,'NBLK'),
-                                    polymer.getparvalue(ie,'BS')) # list containing averaged fid amplitudes (which is proportional to a magnetization phi)
-            df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi']) # DataFrames are nice
-            df['phi_normalized'] = (df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] ) #Normalize magnetization,
-            #Note: in the normalized magnetization the magnetization build-up curves and magnetization decay curves look alike
-            #Note: this makes it easier for fitting as everything looks like 1 * exp(-R/time) in first order
-            polymer.addparameter(ie,'df_magnetization',df) # make the magnetization dataframe accesible as parameter
-            fit_option = 2 #mono exponential, 3 parameter fit
-            p0=[1.0, polymer.getparvalue(ie,'T1MX')**-1*2, 0] #choose startparameters for fitting an exponential decay
-            df, popt = magnetization_fit(df, p0, fit_option) # use leastsq to find optimal parameters
-            polymer.addparameter(ie,'popt(mono_exp)',popt) # add fitting parameters for later access
-            logger.info('fitfunction(t) = {} * exp(- {} * t) + {}'.format(*popt)) # print the fitting parameters to console (for convenience)
-        except KeyError:
-            logger.warning('no relaxation experiment found')
-            tau=np.zeros(1)
-            phi=np.zeros(1)
-            df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
-            df['phi_normalized'] = np.zeros(1)
-            df['fit_phi'] = np.zeros(1)
-        return fid, df
+                tau = polymer.get_tau_axis(ie) #numpy array containing the taus for experiment ie
+                try:
+                    startpoint=fid_slider.range[0] #lower integration bound
+                    endpoint = fid_slider.range[1] #upper integration bound
+                except NameError:
+                    # fid_slider not initialized for first plot. Use default values:
+                    startpoint=int(0.05*polymer.getparvalue(ie,'BS'))
+                    endpoint = int(0.1*polymer.getparvalue(ie,'BS'))
+                    logger.debug('fid_slider not initialized for first plot. Use default values {} and {}.'.format(startpoint, endpoint))
+                    
+                polymer.addparameter(ie,'fid_range',(startpoint,endpoint)) #add integration range to parameters to make it accesible
+                phi = get_mag_amplitude(fid, startpoint, endpoint,
+                                        polymer.getparvalue(ie,'NBLK'),
+                                        polymer.getparvalue(ie,'BS')) # list containing averaged fid amplitudes (which is proportional to a magnetization phi)
+                df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi']) # DataFrames are nice
+                df['phi_normalized'] = (df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] ) #Normalize magnetization,
+                #Note: in the normalized magnetization the magnetization build-up curves and magnetization decay curves look alike
+                #Note: this makes it easier for fitting as everything looks like 1 * exp(-R/time) in first order
+                polymer.addparameter(ie,'df_magnetization',df) # make the magnetization dataframe accesible as parameter
+                fit_option = 2 #mono exponential, 3 parameter fit
+                p0=[1.0, polymer.getparvalue(ie,'T1MX')**-1*2, 0] #choose startparameters for fitting an exponential decay
+                df, popt = magnetization_fit(df, p0, fit_option) # use leastsq to find optimal parameters
+                polymer.addparameter(ie,'popt(mono_exp)',popt) # add fitting parameters for later access
+                logger.info('fitfunction(t) = {} * exp(- {} * t) + {}'.format(*popt)) # print the fitting parameters to console (for convenience)
+            except KeyError:
+                logger.warning('no relaxation experiment found')
+                tau=np.zeros(1)
+                phi=np.zeros(1)
+                df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
+                df['phi_normalized'] = np.zeros(1)
+                df['fit_phi'] = np.zeros(1)
+            return fid, df
 
     def calculate_mag_dec(attr, old, new, start_ie=None):
         ''' Is being call from the callback for the experiment chooser
@@ -272,13 +284,12 @@ def modify_doc(doc):
         
     def callback_load_more_data(attr,old,new):
         ''' callback for loading of data '''
-        # TODO: implement
-        logger.debug('callback for loading of data ')
-        logger.error('Not implemented!')
+        # first clear the list, or it keeps on growing with the same filenames:
+        sdf_list = []
         path=pathbox.value.strip()
         file=filebox.value.strip()
+        logger.info('callback for loading data. pathname: {}, filename: {}'.format(path, file))
         if file=="*.sdf":
-            logger.info('callback for loading data. filename: {}'.format(file))
             allsdf=filter(lambda x: x.endswith('.sdf'),os.listdir(path))
             for f in allsdf:
                 sdf_list.append(sdf.StelarDataFile(f,path))
@@ -288,6 +299,10 @@ def modify_doc(doc):
         filenames=[x.file() for x in sdf_list]
         filenames_df=pd.DataFrame(data=filenames,columns=['file'])
         table_source.data=ColumnDataSource.from_df(filenames_df)
+        
+    def callback_select_filename(attr,old,new):
+        ''' callback for selecting one datafile '''
+        logger.info('callback for selecting new filename: {}, {}, {}'.format(attr, old, new))
 
     def callback_export_data(attr,old,new):
         logger.debug('callback_export_data has been called ')
@@ -323,22 +338,14 @@ def modify_doc(doc):
     # New Tab for each datafile?
     # dropdown selection to choose datafile
     # complete new start of process? (probably not prefered)
-
-    polymer = load_data('glyzerin_d3_300K.sdf')
-    nr_experiments = polymer.get_number_of_experiments()
-    start_ie = 1     # initially set ie = 1
-    par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
-    # for the initial call get the dataframes without callback
-    # they are being updated in following callbacks
-    fid, df = get_data_frames(start_ie)
-    source_fid = ColumnDataSource(data=ColumnDataSource.from_df(fid))
-    source_mag_dec = ColumnDataSource(data=ColumnDataSource.from_df(df))
+    polymer, source_fid, source_mag_dec, par_df, columns, discrete, continuous, time, quantileable, start_ie = load_polymer()
+    
     # initialy creates the plots p1 and p2
     p1, p2 = create_plot_1_and_2(source_fid, source_mag_dec)
     
     ### initiates widgets, which will call the callback on change ###
     # initiate slider to choose experiment
-    experiment_slider = Slider(start=1, end=nr_experiments, value=1, step=1,callback_policy='mouseup', width=800) #select experiment by value
+    experiment_slider = Slider(start=1, end=polymer.get_number_of_experiments(), value=1, step=1,callback_policy='mouseup', width=800) #select experiment by value
     # initiate slider for the range in which fid shall be calculated
     # select the intervall from which magneitization is calculated from fid
     fid_slider = RangeSlider(start=1,end=polymer.getparvalue(start_ie,'BS'),
@@ -398,7 +405,6 @@ def modify_doc(doc):
     # load more data:
     table_source=ColumnDataSource(data=dict())
     sdf_list=[polymer]
-    # TODO: This is current plan, to save the different dataframes in a list, right?
     filenames=[x.file() for x in sdf_list]
     files_df=pd.DataFrame(data=filenames,columns=['file'])
     table_source.data=ColumnDataSource.from_df(files_df)
@@ -407,12 +413,13 @@ def modify_doc(doc):
         #TableColumn(field='file', title='Filename'),
         ]
     table=DataTable(source=table_source,columns=t_columns)
-    pathbox=TextInput(title="Path",value=os.path.curdir)
+    pathbox=TextInput(title="Path",value=osp.join(osp.curdir, '/data'))
     filebox=TextInput(title="Filename",value="*.sdf")
     pathbox.on_change('value',callback_load_more_data)
     filebox.on_change('value',callback_load_more_data)
     layout_input=column(pathbox,filebox,table)
-
+    # select a filename by clicking on it:
+    table_source.on_change('selected', callback_select_filename)
     # Data Out: export data from figures
     #         & export parameters
 
@@ -426,7 +433,7 @@ def modify_doc(doc):
     export_button.on_click(callback_write_table_to_file)
  
     layout_output=row(column(export_slider,export_text,export_button),output_table)
-    print('after layout_output')
+    logger.debug('after layout_output')
     
 
     # set the layout of the tabs
@@ -444,11 +451,11 @@ def modify_doc(doc):
     # initialize tabs object with 3 tabs
     tabs = Tabs(tabs = [tab_relaxation, tab_parameters,
                         tab_input, tab_output])
-    print('tabs')
+    logger.debug('tabs')
     doc.add_root(tabs)
     doc.add_root(source) # i need to add source to detect changes
     doc.add_root(source2)
-    print('tab tab')
+    logger.debug('tab tab')
 
 def main():
     bokeh_app = Application(FunctionHandler(modify_doc))
@@ -457,8 +464,6 @@ def main():
     server = Server({'/': bokeh_app}, io_loop=io_loop)
     server.start()
     io_loop.add_callback(server.show, "/")
-    
-    print('server')
     io_loop.start()
 
 if __name__ == '__main__':
