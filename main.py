@@ -135,58 +135,15 @@ def modify_doc(doc):
     logger.debug('modify_doc has been called')
     def load_polymer(filename='glyzerin_d3_300K.sdf', path=None):
         # load this datafile initially:
-        polymer = load_data()
+        polymer = load_data(osp.join(path, filename))
         start_ie = 1     # initially set ie = 1
         par_df, columns, discrete, continuous, time, quantileable = polymer.scan_parameters(20)
         # for the initial call get the dataframes without callback
         # they are being updated in following callbacks
-        fid, df = get_data_frames(start_ie)
+        fid, df = polymer.get_data_frames(start_ie)
         source_fid = ColumnDataSource(data=ColumnDataSource.from_df(fid))
         source_mag_dec = ColumnDataSource(data=ColumnDataSource.from_df(df))
         return polymer, source_fid, source_mag_dec, par_df, columns, discrete, continuous, time, quantileable, start_ie
-
-    def get_data_frames(ie,):
-            """ Called one time initially, and then every time the experiment number is changed by the slider
-            :param ie: experiment number
-            :type ie: int
-            :returns: dataframe from stella datafile and dataframe with tau and phi and fitted values
-            :rtype: list of 2 pandas dataframes
-            """
-            logger.debug('get_dataframe with ie={}'.format(ie))
-            fid = polymer.getfid(ie) #read FID or series of FIDs for selected experiment
-            try:
-                tau = polymer.get_tau_axis(ie) #numpy array containing the taus for experiment ie
-                try:
-                    startpoint=fid_slider.range[0] #lower integration bound
-                    endpoint = fid_slider.range[1] #upper integration bound
-                except NameError:
-                    # fid_slider not initialized for first plot. Use default values:
-                    startpoint=int(0.05*polymer.getparvalue(ie,'BS'))
-                    endpoint = int(0.1*polymer.getparvalue(ie,'BS'))
-                    logger.debug('fid_slider not initialized for first plot. Use default values {} and {}.'.format(startpoint, endpoint))
-                    
-                polymer.addparameter(ie,'fid_range',(startpoint,endpoint)) #add integration range to parameters to make it accesible
-                phi = get_mag_amplitude(fid, startpoint, endpoint,
-                                        polymer.getparvalue(ie,'NBLK'),
-                                        polymer.getparvalue(ie,'BS')) # list containing averaged fid amplitudes (which is proportional to a magnetization phi)
-                df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi']) # DataFrames are nice
-                df['phi_normalized'] = (df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] ) #Normalize magnetization,
-                #Note: in the normalized magnetization the magnetization build-up curves and magnetization decay curves look alike
-                #Note: this makes it easier for fitting as everything looks like 1 * exp(-R/time) in first order
-                polymer.addparameter(ie,'df_magnetization',df) # make the magnetization dataframe accesible as parameter
-                fit_option = 2 #mono exponential, 3 parameter fit
-                p0=[1.0, polymer.getparvalue(ie,'T1MX')**-1*2, 0] #choose startparameters for fitting an exponential decay
-                df, popt = magnetization_fit(df, p0, fit_option) # use leastsq to find optimal parameters
-                polymer.addparameter(ie,'popt(mono_exp)',popt) # add fitting parameters for later access
-                logger.info('fitfunction(t) = {} * exp(- {} * t) + {}'.format(*popt)) # print the fitting parameters to console (for convenience)
-            except KeyError:
-                logger.warning('no relaxation experiment found')
-                tau=np.zeros(1)
-                phi=np.zeros(1)
-                df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
-                df['phi_normalized'] = np.zeros(1)
-                df['fit_phi'] = np.zeros(1)
-            return fid, df
 
     def calculate_mag_dec(attr, old, new, start_ie=None):
         ''' Is being call from the callback for the experiment chooser
@@ -197,7 +154,7 @@ def modify_doc(doc):
             '''
         ie = experiment_slider.value   #get expermient number from the slider
         logger.debug('calculate mag_dec for ie={}'.format(ie))
-        fid, df = get_data_frames(ie)
+        fid, df = polymer.get_data_frames(ie)
         source_fid.data=ColumnDataSource.from_df(fid) #convert fid to bokeh format
         source_mag_dec.data = ColumnDataSource.from_df(df)
 
@@ -273,6 +230,7 @@ def modify_doc(doc):
         """
         ie = experiment_slider.value
         logger.debug('Callback experiment update, ie={}'.format(ie))
+        logger.debug('Current Polymer:{}'.format(polymer.FileName))
         fid_slider.end = polymer.getparvalue(ie,'BS')
         try:
             fid_slider.range=polymer.getparvalue(ie,'fid_range')
@@ -301,8 +259,15 @@ def modify_doc(doc):
         table_source.data=ColumnDataSource.from_df(filenames_df)
         
     def callback_select_filename(attr,old,new):
-        ''' callback for selecting one datafile '''
-        logger.info('callback for selecting new filename: {}, {}, {}'.format(attr, old, new))
+        ''' callback for selecting one datafile 
+        
+            Updates the polymer instance, so in the following callbacks the new polymer should be used'''
+        selected_filename = table_source.data['file'][table_source.selected['1d']['indices'][0]]
+        logger.info('callback for selecting new filename: {}'.format(selected_filename))
+        fn, path = osp.basename(selected_filename), osp.dirname(selected_filename)
+        # TODO: The following DOES NOT update the polymer instance
+        polymer, source_fid, source_mag_dec, par_df, columns, discrete, continuous, time, quantileable, start_ie = load_polymer(filename=fn, path=path)        
+
 
     def callback_export_data(attr,old,new):
         logger.debug('callback_export_data has been called ')
@@ -338,7 +303,7 @@ def modify_doc(doc):
     # New Tab for each datafile?
     # dropdown selection to choose datafile
     # complete new start of process? (probably not prefered)
-    polymer, source_fid, source_mag_dec, par_df, columns, discrete, continuous, time, quantileable, start_ie = load_polymer()
+    polymer, source_fid, source_mag_dec, par_df, columns, discrete, continuous, time, quantileable, start_ie = load_polymer(path=r'c:\workspace\fieldcycling\data')
     
     # initialy creates the plots p1 and p2
     p1, p2 = create_plot_1_and_2(source_fid, source_mag_dec)

@@ -5,7 +5,7 @@ import numpy as np
 import numpy.matlib
 import pandas as pd
 from num_string_eval import NumericStringParser
-from utils import freq_shift
+from utils import *
 import logging
 
 class StelarDataFile:
@@ -145,6 +145,50 @@ class StelarDataFile:
         time = [x for x in continuous if x=='TIME']
         quantileable = [x for x in continuous if len(par_df[x].unique()) > quantiles]
         return par_df, columns, discrete, continuous, time, quantileable
+
+    def get_data_frames(self, ie):
+            """ Called one time initially, and then every time the experiment number is changed by the slider
+            :param ie: experiment number
+            :type ie: int
+            :returns: dataframe from stella datafile and dataframe with tau and phi and fitted values
+            :rtype: list of 2 pandas dataframes
+            """
+            self.logger.debug('get_dataframe with ie={}'.format(ie))
+            fid = self.getfid(ie) #read FID or series of FIDs for selected experiment
+            try:
+                tau = self.get_tau_axis(ie) #numpy array containing the taus for experiment ie
+                try:
+                    startpoint=fid_slider.range[0] #lower integration bound
+                    endpoint = fid_slider.range[1] #upper integration bound
+                except NameError:
+                    # fid_slider not initialized for first plot. Use default values:
+                    startpoint=int(0.05*self.getparvalue(ie,'BS'))
+                    endpoint = int(0.1*self.getparvalue(ie,'BS'))
+                    self.logger.debug('fid_slider not initialized for first plot. Use default values {} and {}.'.format(startpoint, endpoint))
+                    
+                self.addparameter(ie,'fid_range',(startpoint,endpoint)) #add integration range to parameters to make it accesible
+                phi = get_mag_amplitude(fid, startpoint, endpoint,
+                                        self.getparvalue(ie,'NBLK'),
+                                        self.getparvalue(ie,'BS')) # list containing averaged fid amplitudes (which is proportional to a magnetization phi)
+                df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi']) # DataFrames are nice
+                df['phi_normalized'] = (df['phi'] - df['phi'].iloc[0] ) / (df['phi'].iloc[-1] - df['phi'].iloc[1] ) #Normalize magnetization,
+                #Note: in the normalized magnetization the magnetization build-up curves and magnetization decay curves look alike
+                #Note: this makes it easier for fitting as everything looks like 1 * exp(-R/time) in first order
+                self.addparameter(ie,'df_magnetization',df) # make the magnetization dataframe accesible as parameter
+                fit_option = 2 #mono exponential, 3 parameter fit
+                p0=[1.0, self.getparvalue(ie,'T1MX')**-1*2, 0] #choose startparameters for fitting an exponential decay
+                df, popt = magnetization_fit(df, p0, fit_option) # use leastsq to find optimal parameters
+                self.addparameter(ie,'popt(mono_exp)',popt) # add fitting parameters for later access
+                self.logger.info('fitfunction(t) = {} * exp(- {} * t) + {}'.format(*popt)) # print the fitting parameters to console (for convenience)
+            except KeyError:
+                self.logger.warning('no relaxation experiment found')
+                tau=np.zeros(1)
+                phi=np.zeros(1)
+                df = pd.DataFrame(data=np.c_[tau, phi], columns=['tau', 'phi'])
+                df['phi_normalized'] = np.zeros(1)
+                df['fit_phi'] = np.zeros(1)
+            return fid, df
+
 
     def sdfimport(self):
         ie=1
