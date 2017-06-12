@@ -32,7 +32,7 @@ s1.callback = Callback(args=dict(s2=s2, m1=m1), code="""
   var d2 = s2.get('data');
   d2['y'] = []
   d2['y2'] = []
-  for (i = 0; i < 11; i++) {
+  for (i = 0; i < 11; i++) {o
     d2['y'].push(d1[inds['0']][i]),
     d2['y2'].push(d1[inds['1']][i])
   }
